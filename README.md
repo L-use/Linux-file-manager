@@ -4,17 +4,17 @@
 
 ## 在线快速安装
 
-在 Linux 服务器终端运行。将 `/srv/files` 换成服务器上已有的目录。
+在 Linux 服务器终端运行。默认管理当前用户的家目录并使用 8080 端口。
 
 ```sh
-curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/install.sh -o install.sh && sh install.sh --repo L-use/Linux-file-manager --root /srv/files
+curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/install.sh -o install.sh && sh install.sh --start
 ```
 
 | 步骤 | 操作 |
 | --- | --- |
 | 选择语言 | 安装器先用英文询问。输入 `1` 选中文，输入 `2` 或直接回车选英文。 |
 | 选择安装位置 | 输入路径，或回车使用默认位置。 |
-| 安装完成 | 核对终端列出的命令位置和配置路径，再输入 `filemanager` 打开菜单。 |
+| 安装和启动 | 脚本校验发布包并注册命令。首次运行时按提示为 `admin` 设置密码，随后程序自动转入后台。 |
 
 默认安装位置为 root 的 `/opt/filemanager` 或普通用户的 `~/.local/share/filemanager`。设置了 `XDG_DATA_HOME` 时，普通用户默认使用其下的 `filemanager` 目录。普通用户的命令放在 `~/.local/bin`，安装器会提示是否需要将它加入 PATH。
 
@@ -28,9 +28,9 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 | `--lang zh\|en` | 指定安装与菜单语言，跳过语言询问。 |
 | `--start` | 安装后直接启动。升级时会先停止已安装的实例。 |
 
-脚本依赖 `curl`、`unzip` 以及 `sha256sum` 或 `shasum`。再次运行脚本可升级，已有配置和状态会保留。无终端时默认使用英文和默认安装位置。
+在线安装使用系统的 `curl`、`tar` 以及 `sha256sum` 或 `shasum`，省去预先安装解压工具的步骤。再次运行脚本可升级，已有配置和状态会保留。无终端时默认使用英文和默认安装位置。
 
-发布到 GitHub 时，将 `install.sh`、两个 Linux ZIP 和 `SHA256SUMS` 上传到同一个 Release。固定版本时，下载地址改用 `releases/download/版本标签/install.sh`，同时传入相同的 `--tag`。
+发布到 GitHub 时，将 `install.sh`、两个在线安装用的 `.tar.gz`、两个离线 ZIP 和 `SHA256SUMS` 上传到同一个 Release。固定版本时，下载地址改用 `releases/download/版本标签/install.sh`，同时传入相同的 `--tag`。
 
 ## 使用程序
 
@@ -127,14 +127,14 @@ files.example.com {
 
 ## 从源码构建
 
-在构建机安装 Go 1.25 或更新版本、`zip` 和 `sh`。源树内已包含所需 Go 模块和网页组件，可离线构建。Linux 部署机只需要解压工具。
+在构建机安装 Go 1.25 或更新版本、`tar`、`zip` 和 `sh`。源树内已包含所需 Go 模块和网页组件，可离线构建。
 
 ```sh
 go test -mod=vendor ./...
 ./build.sh
 ```
 
-两个 Linux 发布包、源码 ZIP、安装脚本和 SHA-256 校验清单位于 `dist/`。本地单独构建可用 `go build -mod=vendor -o filemanager .`。第三方信息见 `THIRD_PARTY.md`。
+两个离线 ZIP、两个在线安装包、源码 ZIP、安装脚本和 SHA-256 校验清单位于 `dist/`。本地单独构建可用 `go build -mod=vendor -o filemanager .`。第三方信息见 `THIRD_PARTY.md`。
 
 ## 许可证
 

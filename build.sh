@@ -23,13 +23,15 @@ for arch in amd64 arm64; do
   (
     cd "$stage"
     zip -q -yr "$name.zip" "$name"
+    COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name/filemanager" "$name/config.json"
   )
 done
 
 zip -q -r "$stage/file-manager-source.zip" README.md LICENSE THIRD_PARTY.md config.example.json .gitignore build.sh install.sh go.mod go.sum ./*.go vendor web -x '*/.DS_Store'
 cp install.sh "$stage/install.sh"
 
-set -- file-manager-linux-amd64.zip file-manager-linux-arm64.zip file-manager-source.zip install.sh
+set -- file-manager-linux-amd64.zip file-manager-linux-arm64.zip file-manager-source.zip \
+  file-manager-linux-amd64.tar.gz file-manager-linux-arm64.tar.gz install.sh
 (
   cd "$stage"
   if command -v sha256sum >/dev/null 2>&1; then

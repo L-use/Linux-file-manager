@@ -52,11 +52,12 @@ Options:
 Root defaults: /opt/filemanager and /usr/local/bin.
 User defaults: ~/.local/share/filemanager and ~/.local/bin.
 Existing config.json and state are kept. On upgrade, edit config.json to
-change the root or port. GitHub repository can also be set in FILEMANAGER_REPO.
+change the root or port. The GitHub repository defaults to
+L-use/Linux-file-manager and can be overridden with FILEMANAGER_REPO.
 HELP
 }
 
-repo=${FILEMANAGER_REPO:-}
+repo=${FILEMANAGER_REPO:-L-use/Linux-file-manager}
 tag=
 install_dir=
 bin_dir=
@@ -152,7 +153,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 
-need unzip
+need tar
 need curl
 printf '%s\n' "$repo" | LC_ALL=C grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' ||
   fail "Use --repo OWNER/REPO." "请通过 --repo OWNER/REPO 指定 GitHub 仓库。"
@@ -176,18 +177,19 @@ case "$install_dir" in
   '~/'*) install_dir="$HOME/${install_dir#'~/'}" ;;
 esac
 say "  Directory  $install_dir" "  安装目录  $install_dir"
-archive="$work/$asset.zip"
+archive_name="$asset.tar.gz"
+archive="$work/$archive_name"
 checksums="$work/SHA256SUMS"
 step '2/3  Download and verify' '2/3  下载与校验'
 say "  Downloading the $arch release…" "  正在下载 $arch 发布包…"
 curl --proto '=https' --proto-redir '=https' -fsSL -- "$release/SHA256SUMS" > "$checksums" ||
   fail "Could not download SHA256SUMS." "无法下载 SHA256SUMS 校验清单。"
-curl --proto '=https' --proto-redir '=https' -fsSL -- "$release/$asset.zip" > "$archive" ||
-  fail "Could not download $asset.zip." "无法下载 $asset.zip。"
+curl --proto '=https' --proto-redir '=https' -fsSL -- "$release/$archive_name" > "$archive" ||
+  fail "Could not download $archive_name." "无法下载 $archive_name。"
 
-expected=$(awk -v file="$asset.zip" '$2 == file || $2 == "*" file {print $1}' "$checksums")
+expected=$(awk -v file="$archive_name" '$2 == file || $2 == "*" file {print $1}' "$checksums")
 [ "${#expected}" -eq 64 ] ||
-  fail "Expected one SHA-256 entry for $asset.zip." "$asset.zip 应有且仅有一条 SHA-256 校验记录。"
+  fail "Expected one SHA-256 entry for $archive_name." "$archive_name 应有且仅有一条 SHA-256 校验记录。"
 case "$expected" in *[!0-9a-fA-F]*) fail "Invalid SHA-256 in manifest." "校验清单中的 SHA-256 无效。" ;; esac
 expected=$(printf '%s' "$expected" | tr 'A-F' 'a-f')
 if command -v sha256sum >/dev/null 2>&1; then
@@ -198,12 +200,12 @@ else
   fail "Required command: sha256sum or shasum." "需要 sha256sum 或 shasum 命令。"
 fi
 [ "${actual%% *}" = "$expected" ] ||
-  fail "SHA-256 verification failed for $asset.zip." "$asset.zip 的 SHA-256 校验失败。"
+  fail "SHA-256 verification failed for $archive_name." "$archive_name 的 SHA-256 校验失败。"
 say '  SHA-256 verified' '  SHA-256 校验通过'
-# Read named files directly. ZIP paths and symlinks are never extracted to disk.
-unzip -p "$archive" "$asset/filemanager" > "$work/filemanager" ||
+# Stream the two known members to fixed destinations.
+tar -xOzf "$archive" "$asset/filemanager" > "$work/filemanager" ||
   fail "Missing executable for $arch." "发布包缺少 $arch 可执行文件。"
-unzip -p "$archive" "$asset/config.json" > "$work/config.json" ||
+tar -xOzf "$archive" "$asset/config.json" > "$work/config.json" ||
   fail "Missing initial config.json." "发布包缺少初始 config.json。"
 
 # The first 20 ELF bytes identify a 64-bit little-endian Linux release and its CPU.
