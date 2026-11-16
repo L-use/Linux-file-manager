@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#edf3fc">
+<title>服务器文件管理器</title>
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/vendor/noto-sans-sc/index.css">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/night.css">
+<script type="module" src="/app.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-button mobile-toggle" id="toggle-tree" data-label="explorer" aria-controls="explorer" aria-expanded="false"></button>
+  <div class="brand"><span id="brand-icon" class="brand-icon"></span><strong data-i18n="title"></strong></div>
+  <div class="top-actions">
+    <button id="theme" class="button theme" type="button" data-label="nightTheme" aria-pressed="false"><span class="theme-icon"></span><span class="theme-name" data-i18n="dayMode"></span></button>
+    <button id="language" class="button language" title="中文 / English"><span>中文</span><span>English</span></button>
+    <button id="account" class="button" data-label="account" aria-haspopup="menu" hidden></button>
+  </div>
+</header>
+
+<main id="workspace" class="workspace" hidden>
+  <button id="backdrop" class="backdrop" tabindex="-1" aria-hidden="true" hidden></button>
+  <aside id="explorer" class="explorer" data-label="explorer">
+    <header class="explorer-bar">
+      <strong data-i18n="explorer"></strong>
+      <div class="explorer-tools">
+        <button id="upload" class="icon-button" data-label="upload"></button>
+        <button id="upload-folder" class="icon-button" data-label="uploadFolder"></button>
+        <button id="new-folder" class="icon-button" data-label="newFolder"></button>
+        <button id="tree-sort" class="icon-button" type="button" data-label="sortTree" aria-haspopup="menu" aria-expanded="false"></button>
+        <button id="refresh" class="icon-button" data-label="refresh"></button>
+      </div>
+    </header>
+    <div class="search-wrap"><span id="search-icon"></span><input id="search" type="search" data-placeholder="search" data-label="search" autocomplete="off"><button id="search-deep" class="icon-button" data-label="searchSubtree"></button></div>
+    <div id="tree" class="tree"></div>
+    <div class="explorer-footer"><span id="folders-icon"></span><span id="item-count"></span><button id="show-hidden" class="icon-button" type="button" data-label="showHidden" aria-pressed="false"></button><button id="open-trash" class="button" data-label="trash"><span data-i18n="trash"></span></button></div>
+    <input type="file" id="files" multiple hidden>
+    <input type="file" id="folder-files" webkitdirectory multiple hidden>
+  </aside>
+  <div id="divider" class="divider" tabindex="0" role="separator" aria-orientation="vertical" aria-controls="explorer" aria-valuemin="195" aria-valuemax="540" data-label="resize"></div>
+  <section id="editor" class="editor" data-label="preview">
+    <div class="tabbar"><div id="tab" class="tab"></div></div>
+    <header class="filebar">
+      <nav id="breadcrumb" class="breadcrumb" data-label="path"></nav>
+      <div class="file-actions" id="file-actions" hidden>
+        <span id="file-size" class="file-size"></span>
+        <a id="download" class="button download" data-label="download" download><span data-i18n="download"></span></a>
+        <button id="preview-fullscreen" type="button" class="icon-button more" data-label="fullscreen" hidden></button>
+        <button id="more" class="icon-button more" data-label="more" aria-haspopup="menu"></button>
+      </div>
+    </header>
+    <div id="preview-host" class="preview-host"></div>
+  </section>
+  <div id="upload-panel" class="upload-panel" hidden></div>
+  <footer class="statusbar">
+    <span class="connection"><i></i><span data-i18n="connected"></span></span>
+    <button class="server-summary" id="server-summary" type="button" aria-controls="server-overlay" aria-expanded="false" data-label="serverStatus">
+      <span id="live-memory">—</span><span id="live-disk">—</span><span id="live-uptime">—</span>
+    </button>
+    <span id="status-details" class="status-details"></span>
+  </footer>
+  <section id="server-overlay" class="server-overlay" data-label="serverStatus" hidden>
+    <header class="server-overlay-title"><span id="server-status-icon"></span><h2 data-i18n="serverStatus"></h2></header>
+    <div class="server-metrics">
+      <div class="server-metric"><strong data-i18n="serverMemory"></strong><div class="server-ring"><span id="overlay-memory"></span></div><small id="memory-amount"></small></div>
+      <div class="server-metric"><strong data-i18n="serverDisk"></strong><div class="server-ring disk-ring"><span id="overlay-disk"></span></div><small id="disk-amount"></small></div>
+      <div class="server-metric server-uptime"><strong data-i18n="serverUptime"></strong><span id="overlay-uptime"></span></div>
+    </div>
+    <div class="service-heading"><h3 id="services-title" data-i18n="serverServices"></h3><span id="services-count"></span></div>
+    <div id="services-body"></div>
+  </section>
+</main>
+
+<main id="login-screen" class="login-screen" hidden>
+  <form id="login-form" class="login-card">
+    <div id="login-icon" class="login-icon"></div>
+    <h1 data-i18n="loginTitle"></h1>
+    <p data-i18n="loginHelp"></p>
+    <label><span data-i18n="username"></span><input name="username" autocomplete="username" value="admin" required></label>
+    <label><span data-i18n="password"></span><input type="password" name="password" autocomplete="current-password" required></label>
+    <div id="login-error" class="login-error" role="alert"></div>
+    <button type="submit" class="primary" data-i18n="login"></button>
+  </form>
+</main>
+<main id="boot" class="login-screen" role="status"><span class="spinner"></span><span data-i18n="loading"></span></main>
+<div id="menu" class="menu" role="menu" hidden></div>
+<dialog id="dialog"></dialog>
+<dialog id="tools-dialog" class="tools-dialog"></dialog>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+</body>
+</html>

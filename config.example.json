@@ -1,0 +1,8 @@
+{
+  "root": "~",
+  "host": "0.0.0.0",
+  "port": 8080,
+  "state_dir": "./state",
+  "secure_cookie": false,
+  "ffmpeg": ""
+}
