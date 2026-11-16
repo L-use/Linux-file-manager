@@ -61,6 +61,10 @@ func run(ready, inheritedLock *os.File) error {
 		}
 	}
 	stopping := command == "stop" || command == "uninstall"
+	managedSystemd, err := systemdInstalled(appDir, executable)
+	if err != nil {
+		return err
+	}
 	configFlag := flag.String("config", "", "JSON configuration file (default: config.json next to executable)")
 	root := flag.String("root", "", "override the management root")
 	listen := flag.String("listen", "", "override the address and port")
@@ -110,6 +114,16 @@ func run(ready, inheritedLock *os.File) error {
 		return fmt.Errorf("resolve state directory: %w", err)
 	}
 
+	defaultSystemd := managedSystemd && len(args) == 0
+	if command == "uninstall" && managedSystemd && !defaultSystemd {
+		return errors.New(cli("Uninstall the systemd installation using its default configuration.", "卸载 systemd 安装时请使用默认配置。"))
+	}
+	if stopping && defaultSystemd {
+		if err := systemctl("stop", systemdUnit); err != nil {
+			return err
+		}
+	}
+
 	var rootAbs string
 	listenAddress := ""
 	if !reset && !stopping {
@@ -155,9 +169,18 @@ func run(ready, inheritedLock *os.File) error {
 	c.State, err = canonical(stateAbs)
 	if stopping && errors.Is(err, fs.ErrNotExist) {
 		if command == "uninstall" {
+			if defaultSystemd {
+				if err := unregisterSystemdService(); err != nil {
+					return err
+				}
+			}
 			return uninstallProgram(executable, configName, nil)
 		}
-		fmt.Println(cli("filemanager is not running", "filemanager 未运行"))
+		if defaultSystemd {
+			fmt.Println(cli("filemanager stopped", "filemanager 已停止"))
+		} else {
+			fmt.Println(cli("filemanager is not running", "filemanager 未运行"))
+		}
 		return nil
 	}
 	if err != nil {
@@ -183,6 +206,10 @@ func run(ready, inheritedLock *os.File) error {
 	}
 	defer stateDir.Close()
 	if command == "stop" {
+		if defaultSystemd && inspectDaemon(c.State) == daemonStopped {
+			fmt.Println(cli("filemanager stopped", "filemanager 已停止"))
+			return nil
+		}
 		return stopServer(stateDir)
 	}
 	if command == "uninstall" {
@@ -194,6 +221,11 @@ func run(ready, inheritedLock *os.File) error {
 			return err
 		}
 		defer lock.Close()
+		if defaultSystemd {
+			if err := unregisterSystemdService(); err != nil {
+				return err
+			}
+		}
 		return uninstallProgram(executable, configName, stateDir)
 	}
 	lock := inheritedLock
@@ -218,6 +250,12 @@ func run(ready, inheritedLock *os.File) error {
 		return nil
 	}
 	if ready == nil && !*foreground && filepath.Base(os.Args[0]) != "file-manager" {
+		if defaultSystemd {
+			if err := lock.Close(); err != nil {
+				return err
+			}
+			return startSystemdService(listenAddress)
+		}
 		return startBackground(executable, append([]string{"start"}, args...), stateDir, lock)
 	}
 
@@ -228,10 +266,13 @@ func run(ready, inheritedLock *os.File) error {
 	videos := newVideoPreviews(videoTool, c.State)
 	defer videos.close()
 	protected := []string{c.State, executable}
+	if managedSystemd {
+		protected = append(protected, systemdUnitPath)
+	}
 	if videoTool != "" {
 		protected = append(protected, videoTool)
 	}
-	for _, name := range []string{"config.json", "config.example.json", "filemanager", "file-manager", "install.sh", languageFile, registeredCommandFile, portableMarker, "README.md", "LICENSE", "THIRD_PARTY.md", "web", "vendor"} {
+	for _, name := range []string{"config.json", "config.example.json", "filemanager", "file-manager", "install.sh", languageFile, registeredCommandFile, portableMarker, systemdMarker, "README.md", "LICENSE", "THIRD_PARTY.md", "web", "vendor"} {
 		internal := filepath.Join(appDir, name)
 		if _, err := os.Stat(internal); err == nil {
 			protected = append(protected, internal)
@@ -281,6 +322,9 @@ func run(ready, inheritedLock *os.File) error {
 		return err
 	}
 	defer control.Close()
+	if err := notifySystemdReady(); err != nil {
+		return fmt.Errorf("notify systemd: %w", err)
+	}
 	log.Printf("Listening on http://%s | root: %s | user: admin", listener.Addr(), rootAbs)
 	if ready != nil {
 		_, _ = fmt.Fprintln(ready, "OK", listener.Addr())

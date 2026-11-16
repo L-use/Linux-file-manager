@@ -159,7 +159,7 @@ func uninstallProgram(executable, configName string, state *os.File) error {
 			return err
 		}
 	}
-	for _, name := range []string{registeredCommandFile, languageFile, portableMarker} {
+	for _, name := range []string{registeredCommandFile, languageFile, portableMarker, systemdMarker} {
 		if err := removeUninstallFile(filepath.Join(appDir, name)); err != nil {
 			return err
 		}

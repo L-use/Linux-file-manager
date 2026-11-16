@@ -23,7 +23,7 @@ for arch in amd64 arm64; do
   (
     cd "$stage"
     zip -q -yr "$name.zip" "$name"
-    COPYFILE_DISABLE=1 tar -czf "$name.tar.gz" "$name/filemanager" "$name/config.json"
+    COPYFILE_DISABLE=1 tar --format=ustar -czf "$name.tar.gz" "$name/filemanager" "$name/config.json"
   )
 done
 

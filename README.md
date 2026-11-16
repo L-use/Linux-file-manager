@@ -4,7 +4,7 @@
 
 ## 在线快速安装
 
-在 Linux 服务器终端运行。默认管理当前用户的家目录并使用 8080 端口。
+在 Linux 服务器终端运行。默认通过 sudo 系统安装到 `/usr/local/filemanager`，管理发起安装的用户家目录，端口为 8080。
 
 ```sh
 curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/install.sh -o install.sh && sh install.sh --start
@@ -13,16 +13,17 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 | 步骤 | 操作 |
 | --- | --- |
 | 选择语言 | 安装器先用英文询问。输入 `1` 选中文，输入 `2` 或直接回车选英文。 |
-| 选择安装位置 | 输入路径，或回车使用默认位置。 |
-| 安装和启动 | 脚本校验发布包并注册命令。首次运行时按提示为 `admin` 设置密码，随后程序自动转入后台。 |
+| 选择安装位置 | 此处填写程序的存放位置。输入可写路径，或回车使用默认位置。 |
+| 安装和启动 | 脚本校验发布包并注册命令。系统安装使用 root 权限。首次运行时按提示设置 `admin` 密码，程序随即启动。支持 systemd 的服务器会注册 `filemanager.service`。 |
 
-默认安装位置为 root 的 `/opt/filemanager` 或普通用户的 `~/.local/share/filemanager`。设置了 `XDG_DATA_HOME` 时，普通用户默认使用其下的 `filemanager` 目录。普通用户的命令放在 `~/.local/bin`，安装器会提示是否需要将它加入 PATH。
+系统安装默认写入 `/usr/local/filemanager`，命令放在 `/usr/local/bin`。在 systemd 服务器上，首次成功启动后会启用开机运行。普通用户使用 `--user` 可免 sudo 安装，默认使用 `~/.local/share/filemanager`。设置了 `XDG_DATA_HOME` 时，改用其下的 `filemanager` 目录。个人安装的命令放在 `~/.local/bin`。
 
 ### 常用安装选项
 
 | 选项 | 用途 |
 | --- | --- |
 | `--root 路径` | 设置网页管理的目录。 |
+| `--user` | 以当前普通用户安装和运行。已有普通用户安装用此选项升级。 |
 | `--install-dir 路径` | 指定程序和配置的存放位置，跳过路径询问。 |
 | `--port 端口` | 指定首次安装的端口。默认 8080。 |
 | `--lang zh\|en` | 指定安装与菜单语言，跳过语言询问。 |
@@ -36,7 +37,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 
 ### 打开管理菜单
 
-- **在线安装后**，运行 `filemanager`。
+- **在线安装后**，root 运行 `filemanager`。普通用户管理系统安装时运行 `sudo filemanager`，个人安装直接运行 `filemanager`。
 - **离线使用**，从 [GitHub Releases](https://github.com/L-use/Linux-file-manager/releases/latest) 下载对应架构的 ZIP，解压后在程序目录运行 `./filemanager`。Linux `x86_64` 选择 amd64，`aarch64` 或 `arm64` 选择 arm64。如执行权限丢失，运行 `chmod +x ./filemanager`。
 
 菜单顶部显示服务状态。绿色 **ACTIVE** 表示已启动，红色 **STOP** 表示已停止。每次回到菜单都会重新读取状态。
@@ -56,7 +57,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 2. 打开菜单，选择 `1`。为 `admin` 输入两遍密码，至少 12 个字符。终端会隐藏输入。
 3. 菜单显示 **ACTIVE** 后，在浏览器打开 `http://服务器IP:8080`，用 `admin` 和刚设置的密码登录。若修改了端口，请使用对应端口。
 
-程序会在后台运行，日志默认写入 `state/filemanager.log`。程序会自动读取可执行文件旁的 `config.json`，配置中的相对路径以配置文件所在目录为准。发布版需要 Linux 的标准 `/proc` 挂载。
+程序会在后台运行。systemd 安装用 `journalctl -u filemanager.service` 查看日志，独立后台运行的日志在 `state/filemanager.log`。程序会自动读取可执行文件旁的 `config.json`，配置中的相对路径以配置文件所在目录为准。发布版需要 Linux 的标准 `/proc` 挂载。
 
 卸载成功后会显示「卸载完成」。如果安装目录或自定义状态目录里还有其他文件，卸载会保留这些文件及其目录。
 
@@ -77,7 +78,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 
 修改端口只需编辑 `config.json` 的 `port`，再停止并重新启动。旧配置的 `listen` 字段仍支持，设置后会覆盖 `host` 和 `port`。命令行仍支持 `--config`、`--root`、`--listen`、`--state-dir`、`--secure-cookie` 和 `--ffmpeg`。使用自定义配置或状态目录启动时，停止或重设密码也要传同样的选项。状态目录会自动创建，已有状态目录应由服务用户持有且仅对该用户开放。
 
-由 systemd 等管理时使用 `filemanager -foreground`，让服务管理器接管启动和停止。包内兼容入口 `./file-manager` 保留原前台行为。
+在线系统安装会自动注册 systemd 服务。可运行 `sudo systemctl status filemanager.service` 查看状态，使用管理菜单可启动、停止或卸载。离线版自行注册服务时，入口为 `filemanager -foreground`。包内兼容入口 `./file-manager` 保留原前台行为。
 
 ## 兼容视频预览
 
