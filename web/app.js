@@ -9,7 +9,7 @@ const tree = $('tree'), workspace = $('workspace'), search = $('search'), menu =
 const cache = new Map(), expanded = new Set(['']), directoryErrors = new Map();
 const editorPane=$('editor');
 const mobileLayout=matchMedia('(max-width:690px), (max-height:500px) and (pointer:coarse)');
-let viewportFullscreen=false;
+let viewportFullscreen=false, sidebarCollapsed=false;
 const formatFilter=$('format-filter');
 const matchesFormat=entry=>!formatFilter.value || entry.kind==='directory' || formatCategory(entry)===formatFilter.value;
 let hiddenFolders=new Set(), showHidden=false;
@@ -309,9 +309,20 @@ async function fullscreenPreview() {
   }
 }
 
+function updateSidebar() {
+  const mobile=mobileLayout.matches;
+  const expanded=mobile?workspace.classList.contains('drawer'):!sidebarCollapsed;
+  workspace.classList.toggle('sidebar-collapsed',!mobile && sidebarCollapsed);
+  const button=$('toggle-tree');
+  const label=expanded?'collapseExplorer':'expandExplorer';
+  button.dataset.label=label;
+  button.title=t(label);
+  button.setAttribute('aria-label',button.title);
+  button.setAttribute('aria-expanded',String(expanded));
+}
 function setDrawer(open) {
   workspace.classList.toggle('drawer',open);
-  $('toggle-tree').setAttribute('aria-expanded',String(open));
+  updateSidebar();
   $('backdrop').hidden=!open;
   if (open) {
     (tree.querySelector('.selected .tree-main') || tree.querySelector('.tree-main') || $('toggle-tree')).focus({preventScroll:true});
@@ -545,8 +556,11 @@ function updateBulkActions() {
   $('bulk-delete').hidden=!selecting;
   $('bulk-delete').disabled=!marked.size || bulkBusy;
   $('bulk-count').textContent=selecting?t('selectedItems',{count:marked.size}):'';
-  $('select-many').disabled=bulkBusy;
-  $('select-many').setAttribute('aria-pressed',String(selecting));
+  const button=$('select-many');
+  button.disabled=bulkBusy;
+  button.setAttribute('aria-pressed',String(selecting));
+  button.dataset.i18n=selecting?'cancelSelectMany':'selectMany';
+  button.textContent=t(button.dataset.i18n);
 }
 function updateGridButton() {
   $('open-grid').hidden=!current;
@@ -2588,7 +2602,15 @@ $('login-form').onsubmit=async(e)=>{
     $('login-error').textContent=errorOf(error);
   } finally {progress.finish();submit.disabled=false;}
 };
-$('toggle-tree').onclick=()=>setDrawer(!workspace.classList.contains('drawer'));
+$('toggle-tree').onclick=()=>{
+  if (mobileLayout.matches) setDrawer(!workspace.classList.contains('drawer'));
+  else {
+    sidebarCollapsed=!sidebarCollapsed;
+    updateSidebar();
+  }
+};
+mobileLayout.addEventListener('change',()=>setDrawer(false));
+updateSidebar();
 $('backdrop').onclick=()=>{setDrawer(false);$('toggle-tree').focus();};
 $('new-folder').onclick=()=>createFolder(targetDirectory());
 $('upload').onclick=()=>pickUpload(targetDirectory());

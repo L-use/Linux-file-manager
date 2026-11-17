@@ -591,3 +591,8 @@ a.button:visited{color:inherit}
  position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)
 }
 .original-status>.smooth-progress-track{flex:0 1 clamp(55px,16vw,150px)}
+
+#toggle-tree:not(:disabled){display:inline-flex}
+.workspace.sidebar-collapsed{grid-template-columns:0 0 minmax(0,1fr)}
+.workspace.sidebar-collapsed>.explorer,.workspace.sidebar-collapsed>.divider{display:none}
+.workspace.sidebar-collapsed>.editor{margin-left:8px}

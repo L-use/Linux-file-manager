@@ -1,4 +1,6 @@
 const strings = {
+ collapseExplorer:['收起侧栏','Collapse sidebar'], expandExplorer:['展开侧栏','Expand sidebar'],
+ cancelSelectMany:['取消多选','Cancel multi-select'],
  loadingGridThumbnails:['正在加载目录缩略图…','Loading folder thumbnails…'],
  uploadCommitting:['传输完成，正在保存到服务器…','Transfer complete. Saving on the server…'],
  locatingFolder:['正在定位目录…','Locating folder…'], creatingFolder:['正在创建目录…','Creating folder…'],
