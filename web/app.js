@@ -184,8 +184,8 @@ function moveHiddenPaths(source,destination) {
 }
 
 const isPreviewFullscreen=()=>(document.fullscreenElement || document.webkitFullscreenElement)===editorPane;
-let fullscreenMoving=false;
-function fullscreenNeighbors() {
+let previewMoving=false;
+function previewNeighbors() {
   if (!current) return [];
   const entries=orderChildren((cache.get(parent(current.path))||[]).filter(entry=>
     entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && fileType(entry).style!=='file')));
@@ -200,12 +200,16 @@ function renderFullscreenButton() {
   button.setAttribute('aria-label',button.title);
 
 }
-async function navigateFullscreen(direction) {
-  const target=fullscreenNeighbors()[direction<0?0:1];
-  if (!target || fullscreenMoving) return;
-  fullscreenMoving=true;
-  try {await showFile(target,{focus:false,closeDrawer:false});}
-  finally {fullscreenMoving=false;}
+async function navigatePreview(direction,focusTree=false) {
+  if (!current || previewMoving) return;
+  const source=current;
+  previewMoving=true;
+  try {
+    if (!cache.has(parent(source.path))) await loadDirectory(parent(source.path));
+    if (current!==source) return;
+    const target=previewNeighbors()[direction<0?0:1];
+    if (target) await showFile(target,{focus:focusTree,closeDrawer:false});
+  } finally {previewMoving=false;}
 }
 function leavePreviewFullscreen() {
   if (!isPreviewFullscreen()) return;
@@ -386,6 +390,7 @@ function renderTree(focusPath) {
       if (e.key==='ArrowLeft' && isDir && expanded.has(entry.path)) {e.preventDefault(); toggleDirectory(entry);}
       if (e.key==='ArrowRight' && isDir && !expanded.has(entry.path)) {e.preventDefault(); toggleDirectory(entry);}
       if (e.key==='ArrowUp' || e.key==='ArrowDown') {
+        if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && current?.path===entry.path) return;
         e.preventDefault();
         const neighbor=e.key==='ArrowUp'?node.previousElementSibling:node.nextElementSibling;
         neighbor?.querySelector('.tree-main')?.focus();
@@ -2355,10 +2360,12 @@ $('more').onclick=()=>{if (current) itemMenu(current,$('more'));};
 search.oninput=()=>renderTree();
 document.addEventListener('pointerdown',(e)=>{if (popup && !menu.contains(e.target) && !popup.anchor.contains(e.target)) closeMenu(false);});
 document.addEventListener('keydown',(e)=>{
-  if (isPreviewFullscreen() && ['ArrowLeft','ArrowRight'].includes(e.key) && !dialog.open && !$('tools-dialog').open && !popup &&
-      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.target.closest('input,textarea,select,[contenteditable]')) {
+  const fullscreen=isPreviewFullscreen();
+  const keys=fullscreen?['ArrowLeft','ArrowRight']:['ArrowUp','ArrowDown'];
+  if (current && keys.includes(e.key) && !e.defaultPrevented && !dialog.open && !$('tools-dialog').open && !popup &&
+      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.target.closest('input,textarea,select,[contenteditable],audio')) {
     e.preventDefault();
-    if (!e.repeat) navigateFullscreen(e.key==='ArrowLeft'?-1:1);
+    if (!e.repeat) navigatePreview(e.key===keys[0]?-1:1,!fullscreen && tree.contains(e.target));
     return;
   }
   if (e.key!=='Escape') return;

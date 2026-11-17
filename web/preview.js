@@ -78,7 +78,7 @@ function media(ctx,isVideo,fallback) {
   const controls=node('div','media-controls');
   const output=node('output'), pointers=new Map();
   let fullscreen=ctx.fullscreenActive(), beforeFullscreen;
-  let mode=fullscreen?'fill':'fit', zoom=1, x=0, y=0, naturalWidth=0, naturalHeight=0, previousPinch;
+  let mode='fit', zoom=1, x=0, y=0, naturalWidth=0, naturalHeight=0, previousPinch;
   let attemptedFallback=false, disposed=false, frame=0, bufferTimer;
   let stageWidth=0,stageHeight=0,layoutScale=0;
   const useThumbnail=!isVideo && ['jpg','jpeg','png'].includes(ctx.type.ext) && ctx.entry.size>=1024*1024;
@@ -475,7 +475,7 @@ function media(ctx,isVideo,fallback) {
     if (active) {
       beforeFullscreen={mode,zoom,x,y};
       x=0;y=0;
-      zoomMode('fill');
+      zoomMode('fit');
       requestOriginal();
     } else if (beforeFullscreen) {
       ({zoom,x,y}=beforeFullscreen);
