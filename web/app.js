@@ -183,23 +183,42 @@ function moveHiddenPaths(source,destination) {
   if (changed) saveVisibility();
 }
 
-const isPreviewFullscreen=()=>document.fullscreenElement===editorPane;
+const isPreviewFullscreen=()=>(document.fullscreenElement || document.webkitFullscreenElement)===editorPane;
+let fullscreenMoving=false;
+function fullscreenNeighbors() {
+  if (!current) return [];
+  const entries=orderChildren((cache.get(parent(current.path))||[]).filter(entry=>
+    entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && fileType(entry).style!=='file')));
+  const at=entries.findIndex(entry=>entry.path===current.path);
+  return at<0?[]:[entries[at-1],entries[at+1]];
+}
 function renderFullscreenButton() {
-  const button=$('preview-fullscreen');
-  button.dataset.label=isPreviewFullscreen()?'exitFullscreen':'fullscreen';
-  button.setAttribute('aria-pressed',String(isPreviewFullscreen()));
+  const active=isPreviewFullscreen(), button=$('preview-fullscreen');
+  button.dataset.label=active?'exitFullscreen':'fullscreen';
+  button.setAttribute('aria-pressed',String(active));
   button.title=t(button.dataset.label);
   button.setAttribute('aria-label',button.title);
+
+}
+async function navigateFullscreen(direction) {
+  const target=fullscreenNeighbors()[direction<0?0:1];
+  if (!target || fullscreenMoving) return;
+  fullscreenMoving=true;
+  try {await showFile(target,{focus:false,closeDrawer:false});}
+  finally {fullscreenMoving=false;}
 }
 function leavePreviewFullscreen() {
-  if (isPreviewFullscreen()) document.exitFullscreen().catch(()=>{});
+  if (!isPreviewFullscreen()) return;
+  const exit=document.exitFullscreen || document.webkitExitFullscreen;
+  if (exit) Promise.resolve(exit.call(document)).catch(()=>{});
 }
 async function fullscreenPreview() {
   if (!current) return;
   if (isPreviewFullscreen()) {leavePreviewFullscreen();return;}
   try {
-    await editorPane.requestFullscreen();
-    activePreview?.prepareFullscreen?.();
+    const request=editorPane.requestFullscreen || editorPane.webkitRequestFullscreen;
+    if (!request) throw new Error('Fullscreen is unavailable');
+    await request.call(editorPane);
   } catch {
     toast('fullscreenUnavailable',{},true);
   }
@@ -747,7 +766,7 @@ async function showFile(entry, options={}) {
   activePreview={
     destroy(){controller.abort();dispose?.destroy?.();},language:refreshLanguage,
     dirty:()=>dispose?.dirty?.(),saving:()=>dispose?.saving?.(),save:()=>dispose?.save?.(),
-    prepareFullscreen:()=>dispose?.prepareFullscreen?.(),
+    fullscreenChanged:enabled=>dispose?.fullscreenChanged?.(enabled),
   };
 
   let latest=entry;
@@ -769,7 +788,7 @@ async function showFile(entry, options={}) {
     } else if (unavailable) $('download').hidden=true;
   }
   const context={
-    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,encoding:options.encoding,
+    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,fullscreenActive:isPreviewFullscreen,encoding:options.encoding,
     showAs:format=>showFile(current,{format,encoding:options.encoding}),
     setEncoding:encoding=>showFile(current,{format:options.format,encoding}),
     getText:()=>json(query('text',entry.path,{encoding:options.encoding||'auto'}),{signal:controller.signal}),
@@ -2240,10 +2259,18 @@ $('preview-fullscreen').innerHTML=icon('fullscreen');
 $('preview-fullscreen').onclick=fullscreenPreview;
 $('show-hidden').onclick=()=>revealHidden(!showHidden);
 updateHiddenButton();
-document.addEventListener('fullscreenchange',()=>{
-  if (!isPreviewFullscreen()) closeMenu(false);
+function fullscreenChanged() {
+  const active=isPreviewFullscreen();
+  editorPane.classList.toggle('preview-fullscreen',active);
+  if (!active) closeMenu(false);
+  activePreview?.fullscreenChanged(active);
   renderFullscreenButton();
-});
+  if (active && current && !cache.has(parent(current.path))) {
+    loadDirectory(parent(current.path));
+  }
+}
+document.addEventListener('fullscreenchange',fullscreenChanged);
+document.addEventListener('webkitfullscreenchange',fullscreenChanged);
 function applyTheme(night) {
   const root=document.documentElement;
   if (night) root.dataset.theme='night';
@@ -2328,6 +2355,12 @@ $('more').onclick=()=>{if (current) itemMenu(current,$('more'));};
 search.oninput=()=>renderTree();
 document.addEventListener('pointerdown',(e)=>{if (popup && !menu.contains(e.target) && !popup.anchor.contains(e.target)) closeMenu(false);});
 document.addEventListener('keydown',(e)=>{
+  if (isPreviewFullscreen() && ['ArrowLeft','ArrowRight'].includes(e.key) && !dialog.open && !$('tools-dialog').open && !popup &&
+      !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.target.closest('input,textarea,select,[contenteditable]')) {
+    e.preventDefault();
+    if (!e.repeat) navigateFullscreen(e.key==='ArrowLeft'?-1:1);
+    return;
+  }
   if (e.key!=='Escape') return;
   if (isPreviewFullscreen()) leavePreviewFullscreen();
   else if (popup) {e.preventDefault();closeMenu();}

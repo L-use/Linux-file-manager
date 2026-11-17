@@ -283,6 +283,17 @@ func run(ready, inheritedLock *os.File) error {
 		return err
 	}
 	defer removeFFmpeg()
+	if len(bundledFFmpeg) > 0 && *ffmpeg == "" && c.FFmpeg == "" {
+		target := configName
+		if target == "" {
+			target = filepath.Join(appDir, "config.json")
+		}
+		if err := recordBundledFFmpeg(target); err != nil {
+			log.Printf("Record bundled FFmpeg in configuration: %v", err)
+		} else {
+			configName = target
+		}
+	}
 	videos := newVideoPreviews(videoTool, c.State)
 	defer videos.cache.clear()
 	protected := []string{c.State, executable}

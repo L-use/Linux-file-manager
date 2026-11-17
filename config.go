@@ -82,3 +82,43 @@ func (c config) address() (string, error) {
 	}
 	return net.JoinHostPort(strings.TrimSuffix(strings.TrimPrefix(c.Host, "["), "]"), strconv.Itoa(c.Port)), nil
 }
+
+func recordBundledFFmpeg(name string) error {
+	raw, err := os.ReadFile(name)
+	mode := fs.FileMode(0600)
+	settings := make(map[string]json.RawMessage)
+	if err == nil {
+		name, err = canonical(name)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(name)
+		if err != nil {
+			return err
+		}
+		mode = info.Mode().Perm()
+		if err := json.Unmarshal(raw, &settings); err != nil {
+			return err
+		}
+		if settings == nil {
+			settings = make(map[string]json.RawMessage)
+		}
+		var path string
+		if value, exists := settings["ffmpeg"]; exists {
+			if err := json.Unmarshal(value, &path); err != nil {
+				return err
+			}
+			if path != "" {
+				return nil
+			}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	settings["ffmpeg"] = json.RawMessage(`"bundled"`)
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writePrivateSetting(name, append(data, '\n'), mode)
+}

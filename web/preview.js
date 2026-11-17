@@ -77,7 +77,8 @@ function media(ctx,isVideo,fallback) {
   let object=node(isVideo?'video':'img','media-object');
   const controls=node('div','media-controls');
   const output=node('output'), pointers=new Map();
-  let mode='fit', zoom=1, x=0, y=0, naturalWidth=0, naturalHeight=0, previousPinch;
+  let fullscreen=ctx.fullscreenActive(), beforeFullscreen;
+  let mode=fullscreen?'fill':'fit', zoom=1, x=0, y=0, naturalWidth=0, naturalHeight=0, previousPinch;
   let attemptedFallback=false, disposed=false, frame=0, bufferTimer;
   let stageWidth=0,stageHeight=0,layoutScale=0;
   const useThumbnail=!isVideo && ['jpg','jpeg','png'].includes(ctx.type.ext) && ctx.entry.size>=1024*1024;
@@ -92,11 +93,12 @@ function media(ctx,isVideo,fallback) {
   const conversion=node('span','media-conversion');
   conversion.dataset.i18n=isVideo?'convertingVideo':'decodingImage';
   conversion.setAttribute('role','status');
-  const base=()=>Math.min(1,stageWidth/naturalWidth,stageHeight/naturalHeight);
+  const base=()=>Math.min(fullscreen?Infinity:1,stageWidth/naturalWidth,stageHeight/naturalHeight);
   const max=()=>Math.max(8,base()*24);
   function paint() {
     if (!naturalWidth || !stageWidth || !stageHeight) return;
     if (mode==='fit') {zoom=base();x=0;y=0;}
+    if (mode==='fill') zoom=Math.max(stageWidth/naturalWidth,stageHeight/naturalHeight);
     if (mode==='actual') zoom=1;
     const dw=naturalWidth*zoom,dh=naturalHeight*zoom;
     x=clamp(x,-Math.max(0,(dw-stageWidth)/2),Math.max(0,(dw-stageWidth)/2));
@@ -128,6 +130,7 @@ function media(ctx,isVideo,fallback) {
     if (mode==='fit' && naturalWidth && stageWidth && stageHeight) zoom=base();
     setPressed(fit,mode==='fit');
     if (actual) setPressed(actual,mode==='actual');
+    setPressed(fill,mode==='fill');
     schedulePaint();
   }
   function apply(scale,clientX,clientY,oldX=clientX,oldY=clientY) {
@@ -147,10 +150,13 @@ function media(ctx,isVideo,fallback) {
     apply(zoom*factor,r.left+r.width/2,r.top+r.height/2);
   }
   const fit=ctx.button('fit','fit',()=>zoomMode('fit'),'button',true);
+  const fill=ctx.button('fillScreen','fullscreen',()=>{x=0;y=0;zoomMode('fill');},'button');
+  fill.hidden=!fullscreen;
   const actual=isVideo?null:ctx.button('actual','image',()=>{requestOriginal();x=0;y=0;zoomMode('actual');},'button');
   if (actual) actual.textContent='100%';
   tools.append(ctx.button('zoomOut','minus',()=>step(1/1.25)),output,ctx.button('zoomIn','plus',()=>step(1.25)),fit);
   if (actual) tools.append(actual);
+  tools.append(fill);
   if (ctx.type.ext==='svg') tools.append(ctx.button('source','code',()=>ctx.showAs('source'),'button',true));
   view.append(tools,stage);
   stage.append(object);
@@ -457,11 +463,26 @@ function media(ctx,isVideo,fallback) {
     ctx.report(error);
   };
   ctx.host.replaceChildren(view);
-  zoomMode('fit');
-  if (useThumbnail) loadThumbnail();
+  zoomMode(mode);
+  if (useThumbnail && fullscreen) requestOriginal();
+  else if (useThumbnail) loadThumbnail();
   else if (isVideo || ctx.type.ext==='svg') object.src=ctx.url;
   else loadOriginal(object);
-  return {destroy,prepareFullscreen:requestOriginal,language(){
+  return {destroy,fullscreenChanged(active){
+    if (active===fullscreen) return;
+    fullscreen=active;
+    fill.hidden=!active;
+    if (active) {
+      beforeFullscreen={mode,zoom,x,y};
+      x=0;y=0;
+      zoomMode('fill');
+      requestOriginal();
+    } else if (beforeFullscreen) {
+      ({zoom,x,y}=beforeFullscreen);
+      zoomMode(beforeFullscreen.mode);
+      beforeFullscreen=null;
+    } else zoomMode('fit');
+  },language(){
     translate(view);
     updateLabels();
     if (naturalWidth) ctx.details(naturalWidth+' × '+naturalHeight);

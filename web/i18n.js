@@ -1,4 +1,6 @@
 const strings = {
+ fillScreen:['铺满屏幕','Fill screen'],
+
  settingsAppearance:['外观与语言','Appearance & language'], settingsTheme:['主题','Theme'], settingsLanguage:['界面语言','Interface language'],
  settingsServer:['服务器','Server'], settingsCache:['预览缓存','Preview cache'], settingsUpdates:['软件更新','Updates'],
 
