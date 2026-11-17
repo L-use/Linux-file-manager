@@ -37,6 +37,8 @@ svg{display:inline-block;vertical-align:middle;width:17px;height:17px;flex:0 0 a
   background:radial-gradient(ellipse at 30% 0%,#9edcffaa,transparent 57%),linear-gradient(153deg,#379dff,#0964dc 74%,#1057be);
   border:1px solid #056ee477;box-shadow:inset 0 1px 0 #ffffffa1,inset 0 -1px 1px #2941b66a,0 3px 7px #1976de33;
 }
+.brand-icon{padding:0}
+.brand-icon:disabled{opacity:1;cursor:default}
 .brand-icon svg{width:19px;height:19px}
 .top-actions,.explorer-tools,.file-actions,.preview-tools,.media-controls{display:flex;align-items:center;gap:5px;flex:none}
 .top-actions{gap:10px;max-width:60%;min-width:0}
@@ -227,7 +229,7 @@ a.button:visited{color:inherit}
  :root{--top:54px;--status:30px}
  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
  .topbar{padding:0 9px;gap:7px;justify-content:flex-start}
- .brand{flex:1;gap:6px}.brand strong{font-size:13px}.brand-icon{display:none}
+ .brand{flex:1;gap:6px}.brand strong{font-size:13px}.brand-icon{width:40px;height:40px}
  .top-actions{gap:4px;max-width:none}
  .format-filter{height:44px;max-width:clamp(94px,32vw,175px)}
  .topbar .icon-button{width:44px;min-height:44px}
@@ -592,7 +594,7 @@ a.button:visited{color:inherit}
 }
 .original-status>.smooth-progress-track{flex:0 1 clamp(55px,16vw,150px)}
 
-#toggle-tree:not(:disabled){display:inline-flex}
 .workspace.sidebar-collapsed{grid-template-columns:0 0 minmax(0,1fr)}
 .workspace.sidebar-collapsed>.explorer,.workspace.sidebar-collapsed>.divider{display:none}
-.workspace.sidebar-collapsed>.editor{margin-left:8px}
+.workspace.sidebar-collapsed>.editor{grid-row:1;margin-left:8px}
+.workspace.sidebar-collapsed>.upload-panel{grid-column:3;margin:7px 8px 0}

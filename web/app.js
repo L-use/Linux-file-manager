@@ -2539,7 +2539,7 @@ async function uploadEntries(path,readEntries,prior={done:0,skipped:0}) {
   }
 }
 
-for (const [id,glyph] of Object.entries({'brand-icon':'server','login-icon':'server','toggle-tree':'explorer','upload':'upload','upload-folder':'uploadFolder','new-folder':'newFolder','tree-sort':'sort','refresh':'refresh','search-icon':'search','search-deep':'searchSubtree','folders-icon':'folder','more':'more'})) $(id).innerHTML=icon(glyph);
+for (const [id,glyph] of Object.entries({'login-icon':'server','toggle-tree':'server','upload':'upload','upload-folder':'uploadFolder','new-folder':'newFolder','tree-sort':'sort','refresh':'refresh','search-icon':'search','search-deep':'searchSubtree','folders-icon':'folder','more':'more'})) $(id).innerHTML=icon(glyph);
 $('tree-sort').onclick=openTreeSort;
 $('open-trash').insertAdjacentHTML('afterbegin',icon('trash'));
 $('open-trash').onclick=openTrashPanel;

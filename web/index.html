@@ -13,8 +13,10 @@
 </head>
 <body>
 <header class="topbar">
-  <button class="icon-button mobile-toggle" id="toggle-tree" data-label="expandExplorer" disabled aria-controls="explorer" aria-expanded="false"></button>
-  <div class="brand"><span id="brand-icon" class="brand-icon"></span><strong data-i18n="title"></strong></div>
+  <div class="brand">
+    <button class="brand-icon" id="toggle-tree" type="button" data-label="expandExplorer" disabled aria-controls="explorer" aria-expanded="false"></button>
+    <strong data-i18n="title"></strong>
+  </div>
   <div class="top-actions">
     <select id="format-filter" class="format-filter" data-label="formatFilter" hidden>
       <option value="" data-i18n="formatAll"></option>
