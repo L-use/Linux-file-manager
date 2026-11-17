@@ -94,7 +94,7 @@ func officeEdit[T any](save func(string, string, []T) error) func(http.ResponseW
 	}
 }
 
-func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews, web fs.FS) http.Handler {
+func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews, web fs.FS, settings *webConfig, updates *releaseUpdater) http.Handler {
 	mux := http.NewServeMux()
 	type action func(http.ResponseWriter, *http.Request) error
 	register := func(pattern string, private bool, handler action) {
@@ -122,6 +122,60 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		return respond(w, map[string]string{"user": "admin", "root": s.absolute})
 	})
 	monitor := &serverMonitor{}
+	register("GET /api/settings/root", true, func(w http.ResponseWriter, r *http.Request) error {
+		result, err := settings.get()
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
+	register("PUT /api/settings/root", true, func(w http.ResponseWriter, r *http.Request) error {
+		var input rootSetting
+		if err := parseJSON(w, r, &input); err != nil {
+			return err
+		}
+		result, err := settings.save(input.Root)
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
+	register("POST /api/settings/restart", true, func(w http.ResponseWriter, r *http.Request) error {
+		if err := updates.restartService(); err != nil {
+			return err
+		}
+		return respond(w, map[string]bool{"ok": true})
+	})
+	register("GET /api/updates", true, func(w http.ResponseWriter, r *http.Request) error {
+		return respond(w, updates.status())
+	})
+	register("POST /api/updates/check", true, func(w http.ResponseWriter, r *http.Request) error {
+		result, err := updates.check(r.Context())
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
+	register("PUT /api/updates", true, func(w http.ResponseWriter, r *http.Request) error {
+		var input releaseUpdate
+		if err := parseJSON(w, r, &input); err != nil {
+			return err
+		}
+		if err := updates.setMode(input.Mode); err != nil {
+			return err
+		}
+		return respond(w, updates.status())
+	})
+	register("POST /api/updates/install", true, func(w http.ResponseWriter, r *http.Request) error {
+		var input releaseUpdate
+		if err := parseJSON(w, r, &input); err != nil {
+			return err
+		}
+		if err := updates.install(r.Context(), input.Latest, false); err != nil {
+			return err
+		}
+		return respond(w, map[string]bool{"ok": true})
+	})
 	register("GET /api/server-status", true, func(w http.ResponseWriter, r *http.Request) error {
 		return respond(w, monitor.sample(s.root, r.URL.Query().Get("services") == "1"))
 	})

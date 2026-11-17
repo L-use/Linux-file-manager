@@ -3,6 +3,7 @@ set -eu
 
 cd "$(dirname "$0")"
 : "${GO:=go}"
+: "${VERSION:=$(cat VERSION)}"
 out="${RELEASE_DIR:-$PWD/dist}"
 stage=$(mktemp -d "$PWD/.release.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
@@ -11,7 +12,7 @@ for arch in amd64 arm64; do
   name="file-manager-linux-$arch"
   release="$stage/$name"
   mkdir "$release"
-  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO" build -mod=vendor -trimpath -ldflags='-s -w' -o "$release/filemanager" .
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" "$GO" build -mod=vendor -trimpath -ldflags="-s -w -X main.buildVersion=$VERSION" -o "$release/filemanager" .
   ln -s filemanager "$release/file-manager"
   cp README.md LICENSE THIRD_PARTY.md "$release/"
   cp config.example.json "$release/config.json"
@@ -27,7 +28,7 @@ for arch in amd64 arm64; do
   )
 done
 
-zip -q -r "$stage/file-manager-source.zip" README.md LICENSE THIRD_PARTY.md config.example.json .gitignore build.sh install.sh go.mod go.sum ./*.go vendor web -x '*/.DS_Store'
+zip -q -r "$stage/file-manager-source.zip" README.md LICENSE THIRD_PARTY.md VERSION config.example.json .gitignore build.sh install.sh go.mod go.sum ./*.go vendor web -x '*/.DS_Store'
 cp install.sh "$stage/install.sh"
 
 set -- file-manager-linux-amd64.zip file-manager-linux-arm64.zip file-manager-source.zip \

@@ -28,6 +28,10 @@ func main() {
 		ready, inheritedLock = daemonFiles()
 	}
 	if err := run(ready, inheritedLock); err != nil {
+		var restart *releaseRestart
+		if errors.As(err, &restart) {
+			err = restart.exec()
+		}
 		if ready != nil {
 			_, _ = fmt.Fprintln(ready, "ERR", err)
 		}
@@ -301,6 +305,15 @@ func run(ready, inheritedLock *os.File) error {
 		}
 		protected = append(protected, absolute, name)
 	}
+	settingsPath := filepath.Join(appDir, "config.json")
+	if configName != "" {
+		settingsPath, err = canonical(configName)
+		if err != nil {
+			return err
+		}
+	}
+	protected = append(protected, settingsPath)
+	webSettings := &webConfig{path: settingsPath, activeRoot: rootAbs, overridden: *root != "", protected: protected}
 	for _, internal := range protected {
 		if inside(internal, rootAbs) {
 			return errors.New("management root overlaps protected application files")
@@ -321,7 +334,8 @@ func run(ready, inheritedLock *os.File) error {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Handler: routes(auth, files, trash, videos, web), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	updates := newReleaseUpdater(executable, c.State)
+	server := &http.Server{Handler: routes(auth, files, trash, videos, web, webSettings, updates), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	listener, err := net.Listen("tcp", listenAddress)
 	if err != nil {
 		return fmt.Errorf(cli("cannot listen on %s: %w", "无法监听 %s：%w"), listenAddress, err)
@@ -337,15 +351,26 @@ func run(ready, inheritedLock *os.File) error {
 	if err := notifySystemdReady(); err != nil {
 		return fmt.Errorf("notify systemd: %w", err)
 	}
+	if err := os.Remove(filepath.Join(appDir, updateBackupName)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("Remove previous release backup: %v", err)
+	}
 	log.Printf("Listening on http://%s | root: %s | user: admin", listener.Addr(), rootAbs)
 	if ready != nil {
 		_, _ = fmt.Fprintln(ready, "OK", listener.Addr())
 		_ = ready.Close()
 	}
 	shutdownDone := make(chan struct{})
+	var stagedUpdate string
+	var restartRequested bool
+	go updates.poll(ctx)
 	go func() {
 		defer close(shutdownDone)
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case stagedUpdate = <-updates.ready:
+			restartRequested = true
+			stop()
+		}
 		deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(deadline); err != nil {
@@ -357,6 +382,9 @@ func run(ready, inheritedLock *os.File) error {
 	<-shutdownDone
 	if !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if restartRequested {
+		return &releaseRestart{staged: stagedUpdate, executable: executable, args: args}
 	}
 
 	return nil

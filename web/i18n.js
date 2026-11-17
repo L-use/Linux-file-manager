@@ -1,4 +1,25 @@
 const strings = {
+ restartService:['重启服务','Restart service'],
+ restartConfirm:['现在重启服务？重启后需要重新登录。','Restart the service now? You will need to sign in again.'],
+ restartReconnect:['暂未重新连接。请刷新页面或查看服务日志。','Could not reconnect yet. Refresh the page or check the service log.'],
+
+ rootLabel:['管理目录','Managed directory'], rootActive:['当前访问目录 {path}。保存后点击「重启服务」生效。','Current directory {path}. Select Restart service after saving.'],
+ rootSaved:['目录已写入配置。重启服务后生效。','Directory saved. Restart the service to apply it.'],
+ rootOverride:['启动参数 --root 覆盖了配置。当前访问 {path}。','The --root startup flag overrides the configuration. Current directory {path}.'],
+ rootInvalid:['请输入绝对路径或以 ~ 开头的有效目录。','Enter an absolute path or a valid directory beginning with ~.'],
+ checkUpdates:['检查更新','Check for updates'], updateMode:['更新方式','Update mode'],
+ updateManual:['手动检查','Check manually'], updateRemind:['有新版时提醒','Notify me about new versions'], updateAuto:['自动安装最新正式版','Install the latest stable release automatically'],
+ updateHelp:['检查更新需要服务器能访问 GitHub。安装新版时服务会重启，需要重新登录。','The server needs access to GitHub. Installing an update restarts the service and requires signing in again.'],
+ updateVersions:['当前 {current} · 最新 {latest}','Current {current} · Latest {latest}'], checkingUpdates:['正在检查更新…','Checking for updates…'],
+ updateAvailable:['发现新版本 {version}。','Version {version} is available.'], updateCurrent:['当前已是最新版本。','You are up to date.'],
+ updateUnsupported:['此构建不支持程序内更新。','In-app updates are unavailable for this build.'],
+ updateUnavailable:['更新已不可用，请重新检查。','Update unavailable. Check again.'],
+ updateCheckError:['无法连接 GitHub 检查更新。','Could not check GitHub for updates.'],
+ updateInstall:['安装更新','Install update'], updateRestart:['安装 {version} 并重启服务？','Install {version} and restart the service?'],
+ updateInstallError:['下载或校验更新失败，请查看服务日志。','The update could not be downloaded or verified. Check the service log.'],
+ updating:['正在下载并校验更新…','Downloading and verifying the update…'], updateRestarting:['服务正在重启…','Restarting the service…'],
+ updateReconnect:['请刷新页面查看版本，或检查服务日志。','Refresh to check the version, or inspect the service log.'],
+
  cacheTotal:['缓存用量','Cache usage'], cacheThumbnails:['图片缩略图','Image thumbnails'], cacheVideos:['视频转码','Converted videos'],
  cacheLimit:['最大缓存容量','Maximum cache size'], cacheSave:['保存容量','Save limit'], cacheSaved:['缓存容量已保存。','Cache limit saved.'],
 

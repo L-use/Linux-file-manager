@@ -94,6 +94,8 @@ Configure a certificate and allow incoming connections to the HTTPS port. The pr
 
 ### Upgrading
 
+Use the Check for updates button in the top bar to check manually, receive update reminders, or automatically install the latest stable release. In-app installation requires a versioned Linux release, server access to GitHub, and write access to the program directory. It verifies the archive checksum and restarts the service. The Settings gear lets you change the managed directory in `config.json`. Select Restart service beside the directory setting to apply it. The listening port is configured separately in the file.
+
 1. Stop the existing service. If the previous version runs in the foreground, press Ctrl+C in its terminal.
 2. Extract the new ZIP to a temporary directory. Replace the installed `filemanager` executable and run `chmod +x filemanager`. Keep your existing `config.json` and `state/`. If you previously configured the root and port with flags, you can copy the new `config.json` and put those settings in it.
 3. From the original directory, run `./filemanager` and choose Start, or run `filemanager start` for an online installation. Sign back in through your browser.
@@ -227,6 +229,8 @@ files.example.com {
 为域名配置证书并允许访问 HTTPS 端口。代理须保留浏览器的 Range 请求，允许所需上传大小和时间。若代理会缓冲请求内容，可关闭请求缓冲以便服务器直接接收上传流。通过 `https://files.example.com` 登录。局域网直接通过 HTTP 访问时，保持 `secure_cookie` 为 `false`。
 
 ### 更新程序
+
+顶栏的「检查更新」可选择手动检查、有新版本时提醒或自动安装最新正式版。程序内更新需要使用带版本号的 Linux 发布包，服务器能访问 GitHub，运行账号能写入程序目录。安装会先校验发布包，然后重启服务。通过齿轮「设置」可修改 `config.json` 的管理目录，保存后点击旁边的「重启服务」即可生效。监听端口仍在配置文件中单独设置。
 
 1. 停止旧服务。旧版以前台方式运行时，到其终端按 Ctrl+C。
 2. 将新 ZIP 解压到临时目录，把新的 `filemanager` 可执行文件复制到原安装目录并执行 `chmod +x filemanager`。保留已有的 `config.json` 和 `state/`。如果原来靠命令行指定管理目录和端口，可复制新版 `config.json` 到原目录，并把旧命令的设置填进去。

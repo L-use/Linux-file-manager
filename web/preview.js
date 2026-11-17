@@ -53,7 +53,7 @@ function setPressed(button,on) {button.setAttribute('aria-pressed',String(on));}
 function waitLive(ctx) {ctx.signal.throwIfAborted();}
 export function mountPreview(ctx) {
   switch(ctx.type.style) {
-    case 'image': return media(ctx,false,heif.has(ctx.type.ext)?()=>heifImage(ctx):null);
+    case 'image': return media(ctx,false,heif.has(ctx.type.ext)?blob=>heifImage(ctx,blob):null);
     case 'video': return media(ctx,true,()=>ctx.convertVideo().then(url=>({url})));
     case 'text': case 'code': return source(ctx);
     case 'pdf': return pdf(ctx);
@@ -73,10 +73,13 @@ function media(ctx,isVideo,fallback) {
   let stageWidth=0,stageHeight=0,layoutScale=0;
   const useThumbnail=!isVideo && ['jpg','jpeg','png'].includes(ctx.type.ext) && ctx.entry.size>=1024*1024;
   const previewRequest=useThumbnail?new AbortController():null;
-  let thumbnailURL='', thumbnailSize, original, originalRequested=false;
-  const originalStatus=node('span','media-conversion original-status');
-  originalStatus.dataset.i18n='loadingOriginal';
-  originalStatus.setAttribute('role','status');
+  let thumbnailURL='', originalURL='', thumbnailSize, original, originalRequested=false, originalBlob;
+  const originalStatus=node('div','media-conversion original-status');
+  const originalLabel=node('span'), originalProgress=node('progress'), originalPercent=node('span');
+  originalLabel.dataset.i18n='loadingOriginal';
+  originalProgress.dataset.label='loadingOriginal';
+  originalProgress.max=1;
+  originalStatus.append(originalLabel,originalProgress,originalPercent);
   const conversion=node('span','media-conversion');
   conversion.dataset.i18n=isVideo?'convertingVideo':'decodingImage';
   conversion.setAttribute('role','status');
@@ -163,6 +166,7 @@ function media(ctx,isVideo,fallback) {
   function frameReady() {
     conversion.remove();
     originalStatus.remove();
+    originalBlob=null;
     loading(false);
   }
   function dropThumbnail() {
@@ -170,13 +174,53 @@ function media(ctx,isVideo,fallback) {
     thumbnailURL='';
     thumbnailSize=null;
   }
+  async function loadOriginal(image) {
+    stage.append(originalStatus);
+    translate(stage);
+    loading(false);
+    originalProgress.removeAttribute('value');
+    originalPercent.textContent='';
+    try {
+      if (ctx.entry.size>96*1024*1024) {
+        image.src=ctx.url;
+        return;
+      }
+      const reply=await ctx.read();
+      const total=Number(reply.headers.get('Content-Length'));
+      const mime=reply.headers.get('Content-Type') || '';
+      const reader=reply.body?.getReader();
+      const parts=[];
+      let loaded=0;
+      if (reader) {
+        for (;;) {
+          const {done,value}=await reader.read();
+          if (done) break;
+          parts.push(value);
+          loaded+=value.byteLength;
+          if (total>0) {
+            originalProgress.value=Math.min(1,loaded/total);
+            originalPercent.textContent=Math.floor(originalProgress.value*100)+'%';
+          }
+        }
+      }
+      const blob=reader?new Blob(parts,{type:mime}):await reply.blob();
+      if (disposed) return;
+      if (!isVideo && fallback) originalBlob=blob;
+      originalURL=URL.createObjectURL(blob);
+      image.src=originalURL;
+    } catch(error) {
+      if (disposed || ctx.signal.aborted) return;
+      if (image===object && error?.error) ctx.report(error.error);
+      else image.onerror?.();
+    }
+  }
   function requestOriginal() {
     if (!useThumbnail || originalRequested || disposed) return;
     originalRequested=true;
     previewRequest.abort();
     if (!thumbnailSize || !naturalWidth) {
       dropThumbnail();
-      object.src=ctx.url;
+      loadOriginal(object);
       return;
     }
     const image=node('img','media-object');
@@ -185,15 +229,11 @@ function media(ctx,isVideo,fallback) {
     image.fetchPriority='high';
     image.draggable=false;
     original=image;
-    stage.append(originalStatus);
-    translate(stage);
-    loading(false);
     image.onload=()=>{
       if (disposed) return;
       const small=object;
       object=image;
       dimensions(image.naturalWidth,image.naturalHeight);
-      // Swap after layout to keep the fit image visible until the original is ready.
       paint();
       small.replaceWith(image);
       original=null;
@@ -202,12 +242,14 @@ function media(ctx,isVideo,fallback) {
     };
     image.onerror=()=>{
       if (disposed) return;
+      if (originalURL) URL.revokeObjectURL(originalURL);
+      originalURL='';
       original=null;
       originalRequested=false;
       frameReady();
       ctx.notify({error:'originalError'});
     };
-    image.src=ctx.url;
+    loadOriginal(image);
   }
   async function loadThumbnail() {
     try {
@@ -232,7 +274,7 @@ function media(ctx,isVideo,fallback) {
   if (isVideo) {
     view.append(controls);
     object.playsInline=true;
-    object.preload='metadata';
+    object.preload='auto';
     const toggle=()=>object.paused?object.play().catch(()=>{}):object.pause();
     const play=ctx.button('play','play',toggle), mute=ctx.button('mute','volume',()=>{object.muted=!object.muted;});
     const seek=node('input','seek'), volume=node('input','volume'), clock=node('output');
@@ -354,6 +396,8 @@ function media(ctx,isVideo,fallback) {
     clearTimeout(bufferTimer);
     previewRequest?.abort();
     original?.removeAttribute('src');
+    if (originalURL) URL.revokeObjectURL(originalURL);
+    originalBlob=null;
     object.removeAttribute('src');
     dropThumbnail();
     if (isVideo) {object.pause();object.load();}
@@ -370,10 +414,12 @@ function media(ctx,isVideo,fallback) {
     try {
       if (fallback && !attemptedFallback) {
         attemptedFallback=true;
+        originalStatus.remove();
         stage.append(conversion);
         loading(false);
         translate(stage);
-        const asset=await fallback();
+        const asset=await fallback(originalBlob);
+        originalBlob=null;
         if (ctx.signal.aborted || disposed) {
           if (asset.canvas) asset.canvas.width=asset.canvas.height=0;
           return;
@@ -403,7 +449,8 @@ function media(ctx,isVideo,fallback) {
   ctx.host.replaceChildren(view);
   zoomMode('fit');
   if (useThumbnail) loadThumbnail();
-  else object.src=ctx.url;
+  else if (isVideo) object.src=ctx.url;
+  else loadOriginal(object);
   return {destroy,prepareFullscreen:requestOriginal,language(){
     translate(view);
     updateLabels();
@@ -617,8 +664,8 @@ async function arrayBuffer(ctx,max) {
   return bytes.buffer;
 }
 
-async function heifImage(ctx) {
-  const bytes=await arrayBuffer(ctx,96*1024*1024);
+async function heifImage(ctx,blob) {
+  const bytes=blob?await blob.arrayBuffer():await arrayBuffer(ctx,96*1024*1024);
   waitLive(ctx);
   const worker=new Worker('/heif-worker.js',{type:'module'});
   const decoded=await new Promise((resolve,reject)=>{

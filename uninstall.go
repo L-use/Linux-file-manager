@@ -84,7 +84,7 @@ func deleteProgramState(state *os.File) error {
 	}
 	for _, name := range names {
 		if name != "credentials.json" && name != logFileName && name != controlFileName &&
-			name != previewCacheLimitFile && !uninstallTemporary(name, ".credential-", ".fm-video-", ".preview-cache-limit-") {
+			name != previewCacheLimitFile && name != updateModeFile && !uninstallTemporary(name, ".update-archive-", uploadPrefix+"setting-", ".credential-", ".fm-video-", ".preview-cache-limit-") {
 			continue
 		}
 		if err := reportUninstallResult(filepath.Join(state.Name(), name), unix.Unlinkat(int(state.Fd()), name, 0)); err != nil {
@@ -165,7 +165,7 @@ func uninstallProgram(executable, configName string, state *os.File) error {
 		return err
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() && uninstallTemporary(entry.Name(), ".filemanager-language-", ".filemanager.", ".config.", ".install-setting.") {
+		if !entry.IsDir() && uninstallTemporary(entry.Name(), ".filemanager-language-", ".filemanager.", ".config.", ".install-setting.", uploadPrefix+"update-", uploadPrefix+"setting-") {
 			if err := removeUninstallFile(filepath.Join(appDir, entry.Name())); err != nil {
 				return err
 			}

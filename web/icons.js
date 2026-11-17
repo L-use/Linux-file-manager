@@ -1,6 +1,6 @@
 const paths = {
  grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
- settings:'<path d="M4 6h16M4 12h16M4 18h16"/><path d="M8 3v6m8 0v6m-5 0v6"/>',
+ settings:'<circle cx="12" cy="12" r="3"/><path d="m10 2-.6 2.5-1.8.8-2.2-1.3-2.8 2.8 1.3 2.2-.8 1.8L1 11v2l2.6.6.8 1.8-1.3 2.2 2.8 2.8 2.2-1.3 1.8.8.6 2.5h3l.6-2.5 1.8-.8 2.2 1.3 2.8-2.8-1.3-2.2.8-1.8L23 13v-2l-2.6-.6-.8-1.8 1.3-2.2-2.8-2.8-2.2 1.3-1.8-.8L13.5 2z"/>',
  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"/>',
  moon:'<path d="M20.7 15.2A8.8 8.8 0 0 1 8.8 3.3 9 9 0 1 0 20.7 15.2Z"/><path d="M16 3v4m-2-2h4m3 3v2m-1-1h2"/>',
  server:'<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01M12 7.5h5M12 16.5h5"/>',

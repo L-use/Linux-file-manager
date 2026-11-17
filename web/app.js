@@ -217,6 +217,8 @@ function showLogin(error='') {
   selecting=false;
   marked.clear();
   $('settings').hidden=true;
+  $('updates').hidden=true;
+  stopUpdateReminder();
   updateGridButton();
   liveStatus.stop();
   cancelUpload();
@@ -258,6 +260,8 @@ async function showWorkspace(session) {
   workspace.hidden=false;
   $('account').hidden=false;
   $('settings').hidden=false;
+  $('updates').hidden=false;
+  startUpdateReminder();
   $('toggle-tree').disabled=false;
   $('account').querySelector('.account-name').textContent=session.user;
   setEmpty('emptyTitle','emptyHint');
@@ -1217,6 +1221,166 @@ async function deleteMarked() {
   }
 }
 
+function rootSettings(signal) {
+  const section=document.createElement('section');
+  section.className='settings-section';
+  const label=document.createElement('label');
+  label.htmlFor='settings-root';
+  label.dataset.i18n='rootLabel';
+  const input=document.createElement('input');
+  input.id='settings-root';
+  input.type='text';
+  input.disabled=true;
+  input.autocomplete='off';
+  input.spellcheck=false;
+  const info=document.createElement('p');
+  const status=document.createElement('output');
+  status.setAttribute('aria-live','polite');
+  async function saveRoot() {
+    if (save.disabled) return;
+    restart.disabled=save.disabled=input.disabled=true;
+    try {
+      const data=await json('/api/settings/root',{method:'PUT',body:{root:input.value}});
+      input.value=data.root;
+      status.textContent=t('rootSaved');
+    } catch(error) {status.textContent=errorOf(error);}
+    finally {restart.disabled=save.disabled=input.disabled=false;}
+  }
+  const save=makeButton('save','check',saveRoot,'button',true);
+  save.disabled=true;
+  const restart=makeButton('restartService','refresh',async()=>{
+    if (!await reviewEdits() || !window.confirm(t('restartConfirm'))) return;
+    const writable=!save.disabled;
+    restart.disabled=save.disabled=input.disabled=true;
+    status.textContent=t('updateRestarting');
+    try {
+      await json('/api/settings/restart',{method:'POST'});
+      await waitForRestart(status);
+    } catch(error) {status.textContent=errorOf(error);}
+    finally {restart.disabled=false;save.disabled=input.disabled=!writable;}
+  },'button',true);
+  restart.disabled=true;
+  const actions=document.createElement('div');
+  actions.className='cache-actions';
+  actions.append(save,restart);
+  input.onkeydown=event=>{if (event.key==='Enter') saveRoot();};
+  section.append(label,input,info,actions,status);
+  json('/api/settings/root',{signal}).then(data=>{
+    input.value=data.root;
+    save.disabled=input.disabled=!data.writable;
+    restart.disabled=false;
+    info.textContent=t(data.writable?'rootActive':'rootOverride',{path:data.active});
+  }).catch(error=>{if (!signal.aborted) status.textContent=errorOf(error);});
+  return section;
+}
+
+let updateReminderTimer, lastUpdateNotice;
+function stopUpdateReminder() {clearTimeout(updateReminderTimer);}
+function startUpdateReminder() {
+  stopUpdateReminder();
+  const session=generation;
+  async function poll() {
+    try {
+      const data=await json('/api/updates');
+      if (!signedIn || session!==generation) return;
+      paintUpdateNotice(data);
+      if (data.mode==='remind' && data.available && data.latest!==lastUpdateNotice) {
+        lastUpdateNotice=data.latest;
+        toast('updateAvailable',{version:data.latest});
+      }
+    } catch {}
+    if (signedIn && session===generation) updateReminderTimer=setTimeout(poll,30000);
+  }
+  poll();
+}
+function paintUpdateNotice(state) {
+  $('updates').classList.toggle('update-available',state.mode!=='manual' && state.available);
+}
+function openUpdates() {
+  const body=document.createElement('section');
+  body.className='settings-body';
+  const controller=new AbortController();
+  const versions=document.createElement('p'), feedback=document.createElement('output'), hint=document.createElement('p');
+  hint.dataset.i18n='updateHelp';
+  feedback.setAttribute('aria-live','polite');
+  const modes=document.createElement('fieldset');
+  modes.className='update-modes';
+  const legend=document.createElement('legend');
+  legend.dataset.i18n='updateMode';
+  modes.append(legend);
+  let state;
+  const radios={};
+  function paint(data) {
+    state=data;
+    versions.textContent=t('updateVersions',{current:data.current,latest:data.latest || '—'});
+    modes.disabled=false;
+    radios[data.mode].checked=true;
+    radios.auto.disabled=!data.supported;
+    install.hidden=!data.available || !data.supported;
+    paintUpdateNotice(data);
+  }
+  async function changeMode(mode) {
+    modes.disabled=true;
+    try {paint(await json('/api/updates',{method:'PUT',body:{mode}}));}
+    catch(error) {feedback.textContent=errorOf(error);paint(state);}
+  }
+  for (const [mode,key] of [['manual','updateManual'],['remind','updateRemind'],['auto','updateAuto']]) {
+    const row=document.createElement('label'), choice=document.createElement('input'), caption=document.createElement('span');
+    choice.type='radio';choice.name='update-mode';choice.value=mode;
+    choice.onchange=()=>changeMode(mode);
+    caption.dataset.i18n=key;
+    row.append(choice,caption);
+    modes.append(row);
+    radios[mode]=choice;
+  }
+  modes.disabled=true;
+  const check=makeButton('checkUpdates','refresh',async()=>{
+    check.disabled=true;
+    feedback.textContent=t('checkingUpdates');
+    try {
+      const data=await json('/api/updates/check',{method:'POST',signal:controller.signal});
+      paint(data);
+      feedback.textContent=t(data.available?'updateAvailable':data.supported?'updateCurrent':'updateUnsupported',{version:data.latest});
+    } catch(error) {if (!controller.signal.aborted) feedback.textContent=errorOf(error);}
+    finally {check.disabled=false;}
+  },'button',true);
+  const install=makeButton('updateInstall','download',async()=>{
+    if (!window.confirm(t('updateRestart',{version:state.latest}))) return;
+    install.disabled=true;
+    feedback.textContent=t('updating');
+    try {
+      await json('/api/updates/install',{method:'POST',body:{latest:state.latest}});
+      feedback.textContent=t('updateRestarting');
+      await waitForRestart(feedback,state.latest);
+    } catch(error) {feedback.textContent=errorOf(error);}
+    finally {install.disabled=false;}
+  },'button',true);
+  install.hidden=true;
+  const actions=document.createElement('div');
+  actions.className='cache-actions';
+  actions.append(check,install);
+  body.append(versions,modes,hint,actions,feedback);
+  if (!openToolPanel('checkUpdates',body,()=>controller.abort())) return;
+  json('/api/updates',{signal:controller.signal}).then(paint).catch(error=>{
+    if (!controller.signal.aborted) feedback.textContent=errorOf(error);
+  });
+}
+async function waitForRestart(feedback,version) {
+  for (let attempt=0;attempt<20;attempt++) {
+    await new Promise(resolve=>setTimeout(resolve,1000));
+    // A service restart clears in-memory sessions, so reload when the new server responds.
+    try {
+      const reply=await fetch('/api/updates');
+      if (reply.status===401 || (version && reply.ok && (await reply.json()).current===version)) {
+        location.reload();
+        return;
+      }
+    } catch {}
+  }
+  feedback.textContent=t(version?'updateReconnect':'restartReconnect');
+}
+
+let pendingCacheWrite;
 function openSettings() {
   const body=document.createElement('section');
   body.className='settings-body';
@@ -1247,7 +1411,7 @@ function openSettings() {
   const controller=new AbortController();
   let snapshot, busy=false, revision=0, timer;
   function paint() {
-    amount.textContent=slider.value+' MiB';
+    amount.textContent=snapshot?slider.value+' MiB':'—';
     slider.setAttribute('aria-valuetext',amount.textContent);
     slider.disabled=busy || !snapshot;
     clear.disabled=busy || !snapshot;
@@ -1268,7 +1432,9 @@ function openSettings() {
     paint();
     status.textContent='';
     try {
-      const data=await json(route,{...options,signal:controller.signal});
+      const request=json(route,options);
+      pendingCacheWrite=request;
+      const data=await request;
       slider.value=String(snapshot.limitMiB);
       apply(data);
       status.textContent=t(message);
@@ -1282,13 +1448,15 @@ function openSettings() {
   actions.className='cache-actions';
   actions.append(save,clear);
   slider.oninput=paint;
-  body.append(description,stats,limitLabel,slider,actions,status);
+  slider.onchange=()=>{if (!save.disabled) save.click();};
+  body.append(rootSettings(controller.signal),description,stats,limitLabel,slider,actions,status);
   if (!openToolPanel('settings',body,()=>{controller.abort();clearTimeout(timer);})) return;
   paint();
   async function refreshStats() {
     if (!busy) {
       const requested=revision;
       try {
+        await pendingCacheWrite?.catch(()=>{});
         const data=await json('/api/cache',{signal:controller.signal});
         if (!busy && requested===revision && !controller.signal.aborted) apply(data);
       } catch(error) {
@@ -1926,6 +2094,8 @@ explorer.ondrop=(e)=>{
 $('refresh').onclick=()=>refresh(true);
 $('settings').innerHTML=icon('settings');
 $('settings').onclick=openSettings;
+$('updates').innerHTML=icon('refresh');
+$('updates').onclick=openUpdates;
 $('open-grid').innerHTML=icon('grid');
 updateGridButton();
 $('open-grid').onclick=()=>{
