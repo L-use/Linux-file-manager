@@ -1,4 +1,5 @@
 const strings = {
+ loadingGridThumbnails:['正在加载目录缩略图…','Loading folder thumbnails…'],
  uploadCommitting:['传输完成，正在保存到服务器…','Transfer complete. Saving on the server…'],
  locatingFolder:['正在定位目录…','Locating folder…'], creatingFolder:['正在创建目录…','Creating folder…'],
  movingItem:['正在移动…','Moving item…'], renamingItem:['正在重命名…','Renaming item…'],

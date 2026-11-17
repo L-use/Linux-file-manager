@@ -127,7 +127,7 @@ function taskProgress(label) {
   return {...progress,finish:()=>{
     progress.finish();
     if (!progress.element.isConnected) box.remove();
-    else setTimeout(()=>box.remove(),180);
+    else setTimeout(()=>box.remove(),260);
   }};
 }
 const liveStatus=createServerStatus(json,size);
@@ -614,6 +614,7 @@ function renderGrid() {
   updateGridButton();
   gridPreview?.abort();
   gridPreview=new AbortController();
+  $('grid-progress').replaceChildren();
   const host=$('preview-host');
   rememberGridScroll();
   const prior=gridScrollPositions.get(gridPath) || 0;
@@ -644,7 +645,7 @@ function renderGrid() {
     const preview=document.createElement('span');
     preview.className='tile-preview type-'+type.style;
     preview.innerHTML=icon(type.icon);
-    if (entry.kind==='file') previews.push({entry,type,element:preview});
+    if (entry.kind==='file' && type.style!=='file') previews.push({entry,type,element:preview});
     const name=document.createElement('span');
     name.className='truncate';
     name.textContent=entry.name;
@@ -660,7 +661,16 @@ function renderGrid() {
   else gridDragSelection(grid,tiles);
   replaceReady(host,headline,grid);
   grid.scrollTop=prior;
-  mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL,gridThumbnails);
+  if (previews.length) {
+    const progress=startProgress($('grid-progress'),'loadingGridThumbnails',true);
+    mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL,gridThumbnails,(done,total)=>{
+      progress.update('loadingGridThumbnails',done,total);
+      if (done===total) {
+        progress.complete();
+        progress.finish();
+      }
+    });
+  }
   translate(host);
 }
 async function openGrid(path=targetDirectory()) {
@@ -813,6 +823,8 @@ function setEmpty(title, description='', entry=null, loading=false) {
 function renderHeader() {
   const tab=$('tab'), trail=$('breadcrumb');
   tab.replaceChildren();
+  tab.hidden=!current;
+  $('grid-progress').hidden=Boolean(current);
   trail.replaceChildren();
   $('file-actions').hidden=!current;
   updateGridButton();
@@ -833,9 +845,6 @@ function renderHeader() {
     $('download').href=fileURL(current.path,true);
     $('download').download=current.name;
     $('file-size').textContent=current.kind==='file'?size(current.size):'';
-  } else {
-    n.dataset.i18n='largeIcons';
-    tab.append(n);
   }
   const rootButton=document.createElement('button');
   rootButton.type='button';

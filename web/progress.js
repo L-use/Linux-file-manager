@@ -16,26 +16,42 @@ export function setProgress(bar,done=0,total=1) {
   bar.value=Math.floor(fraction*progressResolution);
 }
 
+export function smoothMeter() {
+  const bar=document.createElement('progress');
+  const track=document.createElement('span');
+  track.className='smooth-progress-track';
+  track.setAttribute('aria-hidden','true');
+  const fill=document.createElement('span');
+  track.append(fill);
+  bar.className='smooth-progress-value';
+  function paint(done=0,total=1) {
+    setProgress(bar,done,total);
+    fill.style.transform=`scaleX(${bar.value/bar.max})`;
+  }
+  paint();
+  return {bar,track,paint};
+}
+
 export function startProgress(host,label='loading',compact=false) {
   const element=document.createElement('div');
   element.className='operation-progress'+(compact?' compact':'');
   const caption=document.createElement('span');
-  const bar=document.createElement('progress');
-  element.append(caption,bar);
+  const {bar,track,paint}=smoothMeter();
+  element.append(caption,bar,track);
   let completed=false;
   function update(key,done=0,total=1) {
     if (completed) return;
     caption.dataset.i18n=bar.dataset.label=key;
     caption.textContent=t(key);
     bar.setAttribute('aria-label',caption.textContent);
-    setProgress(bar,done,total);
+    paint(done,total);
   }
   function complete() {
     completed=true;
-    setProgress(bar,1,1);
+    paint(1,1);
   }
   function finish() {
-    if (completed && element.isConnected) setTimeout(()=>element.remove(),180);
+    if (completed && element.isConnected) setTimeout(()=>element.remove(),260);
     else element.remove();
   }
   update(label);

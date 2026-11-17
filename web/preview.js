@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {replaceReady,setProgress,startProgress} from './progress.js';
+import {replaceReady,smoothMeter,startProgress} from './progress.js';
 import {t,translate} from './i18n.js';
 
 const heif = new Set(['heic','heics','heif','hif']);
@@ -98,12 +98,12 @@ function media(ctx,isVideo,fallback) {
   const previewRequest=useThumbnail?new AbortController():null;
   let thumbnailURL='', originalURL='', thumbnailSize, original, originalRequested=false, originalBlob, originalVersion;
   const originalStatus=node('div','media-conversion original-status');
-  const originalLabel=node('span'), originalProgress=node('progress');
+  const originalLabel=node('span');
+  const {bar:originalProgress,track:originalTrack,paint:paintOriginalProgress}=smoothMeter();
   let originalStatusTimer, bufferProgressTimer;
   originalLabel.dataset.i18n='loadingOriginal';
   originalProgress.dataset.label='loadingOriginal';
-  setProgress(originalProgress);
-  originalStatus.append(originalLabel,originalProgress);
+  originalStatus.append(originalLabel,originalProgress,originalTrack);
   const conversion=node('span','media-conversion');
   const conversionProgress=startProgress(conversion,isVideo?'convertingVideo':'decodingImage');
   const base=()=>Math.min(fullscreen?Infinity:1,stageWidth/naturalWidth,stageHeight/naturalHeight);
@@ -175,13 +175,14 @@ function media(ctx,isVideo,fallback) {
   stage.append(object);
   output.textContent='—';
   const pending=node('div','media-progress');
-  const pendingProgress=startProgress(pending,isVideo?'bufferingMedia':'loading');
+  const pendingLabel=isVideo?'bufferingMedia':'loading';
+  const pendingProgress=startProgress(pending,pendingLabel);
   stage.append(pending);
   function loading(active) {
     clearTimeout(bufferTimer);
     clearTimeout(bufferProgressTimer);
     pending.hidden=!active;
-    if (active) setProgress(pendingProgress.element.querySelector('progress'));
+    if (active) pendingProgress.update(pendingLabel);
     stage.setAttribute('aria-busy',String(active || conversion.isConnected || originalStatus.isConnected));
   }
   loading(true);
@@ -199,14 +200,14 @@ function media(ctx,isVideo,fallback) {
       setTimeout(()=>conversion.remove(),180);
     }
     if (originalStatus.isConnected) {
-      setProgress(originalProgress,1,1);
+      paintOriginalProgress(1,1);
       clearTimeout(originalStatusTimer);
-      originalStatusTimer=setTimeout(()=>originalStatus.remove(),180);
+      originalStatusTimer=setTimeout(()=>originalStatus.remove(),260);
     }
     if (!pending.hidden) {
-      setProgress(pendingProgress.element.querySelector('progress'),1,1);
+      pendingProgress.update(pendingLabel,1,1);
       clearTimeout(bufferProgressTimer);
-      bufferProgressTimer=setTimeout(()=>loading(false),180);
+      bufferProgressTimer=setTimeout(()=>loading(false),260);
     }
     if (originalBlob && originalVersion) ctx.rememberImage(originalBlob,originalVersion);
     originalBlob=null;
@@ -223,7 +224,7 @@ function media(ctx,isVideo,fallback) {
     stage.append(originalStatus);
     translate(stage);
     loading(false);
-    setProgress(originalProgress);
+    paintOriginalProgress();
     try {
       const cached=await ctx.cachedImage();
       if (disposed) return;
@@ -257,13 +258,13 @@ function media(ctx,isVideo,fallback) {
           loaded+=value.byteLength;
           if (loaded>96*1024*1024) {
             await reader.cancel();
-            setProgress(originalProgress);
+            paintOriginalProgress();
             image.src=ctx.url;
             return;
           }
           parts.push(value);
           if (total>0) {
-            setProgress(originalProgress,loaded,total);
+            paintOriginalProgress(loaded,total);
           }
         }
       }
@@ -1545,7 +1546,7 @@ function mediaEvent(media,event,signal,timeout=6000) {
 
 function tileImage(url) {
   const image=node('img','grid-preview-content');
-  image.loading='lazy';image.decoding='async';image.alt='';image.draggable=false;
+  image.decoding='async';image.alt='';image.draggable=false;
   image.onerror=()=>image.remove();
   image.src=url;
   return image;
@@ -1639,16 +1640,12 @@ async function gridThumbnail(ctx) {
         original.width=original.height=0;
         return canvas;
       }
-      if (['jpg','jpeg','png'].includes(ext) && ctx.entry.size<=96*1024*1024) {
+      if (['jpg','jpeg','png','webp','gif','bmp'].includes(ext) && ctx.entry.size<=96*1024*1024) {
         const image=tileImage(ctx.api('thumbnail',{edge:240}));
-        image.onerror=()=>{
-          image.onerror=()=>image.remove();
-          if (ctx.entry.size<=12*1024*1024) image.src=ctx.url;
-          else image.remove();
-        };
-        return image;
+        if (await waitForTileImage(image,ctx.signal)) return image;
+        if (ctx.signal.aborted || ctx.entry.size>12*1024*1024) return null;
       }
-      return tileImage(ctx.url);
+      return ctx.entry.size<=12*1024*1024?tileImage(ctx.url):null;
     case 'video': return videoTile(ctx);
     case 'audio': return audioTile(ctx);
     case 'text': case 'code': {
@@ -1717,29 +1714,60 @@ async function gridThumbnail(ctx) {
   }
 }
 
-export function mountGridThumbnails(grid,items,signal,route,fileURL,cache) {
-  const queue=[], pending=new Map(items.map(item=>[item.element,item]));
-  let running=0;
-  const rendered=new Set();
+async function waitForTileImage(image,signal) {
+  if (signal.aborted) {image.removeAttribute('src');return false;}
+  if (image.complete) return image.naturalWidth>0;
+  try {
+    await mediaEvent(image,'load',signal,16000);
+    return image.naturalWidth>0;
+  } catch {
+    image.removeAttribute('src');
+    return false;
+  }
+}
+
+export function mountGridThumbnails(grid,items,signal,route,fileURL,cache,onProgress) {
+  const pending=new Set(items);
+  const byElement=new Map(items.map(item=>[item.element,item]));
+  const visible=new Set(), rendered=new Set();
+  let running=0, done=0, frame=0;
   const observer=new IntersectionObserver(records=>{
     for (const record of records) {
-      if (!record.isIntersecting) continue;
-      observer.unobserve(record.target);
-      queue.push(pending.get(record.target));
-      pending.delete(record.target);
+      const item=byElement.get(record.target);
+      if (!pending.has(item)) continue;
+      if (record.isIntersecting) visible.add(item);
+      else visible.delete(item);
     }
-    pump();
+    schedule();
   },{root:grid,rootMargin:'100px'});
   signal.addEventListener('abort',()=>{
-    observer.disconnect();queue.length=0;pending.clear();
+    observer.disconnect();
+    cancelAnimationFrame(frame);
+    pending.clear();visible.clear();byElement.clear();
     for (const element of rendered) element.remove();
     rendered.clear();
   },{once:true});
   for (const item of items) observer.observe(item.element);
+  schedule();
+  function schedule() {
+    if (signal.aborted || frame) return;
+    frame=requestAnimationFrame(()=>{
+      frame=0;
+      onProgress(done,items.length);
+      pump();
+    });
+  }
   function pump() {
-    while (!signal.aborted && running<3 && queue.length) {
+    while (!signal.aborted && running<3 && pending.size) {
+      const item=(visible.size?visible:pending).values().next().value;
+      visible.delete(item);pending.delete(item);
+      observer.unobserve(item.element);
       running++;
-      render(queue.shift()).catch(()=>{}).finally(()=>{running--;pump();});
+      render(item).catch(()=>{}).finally(()=>{
+        running--;
+        done++;
+        schedule();
+      });
     }
   }
   async function render({element,entry,type}) {
@@ -1762,37 +1790,17 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL,cache) {
       if (!result.ok) throw new Error('Preview unavailable');
       return result;
     };
-    const progress=startProgress(element,'loadingThumbnail',true);
-    rendered.add(progress.element);
-    function finish(completed=false) {
-      if (completed===true) progress.complete();
-      progress.finish();
-      rendered.delete(progress.element);
+    const content=await gridThumbnail({entry,type,api,url,signal,read:()=>response(url),json:async(action,options)=>(await response(api(action,options))).json()});
+    if (!content || signal.aborted) return;
+    if (content instanceof HTMLImageElement && !await waitForTileImage(content,signal)) return;
+    if (signal.aborted) return;
+    attach(content);
+    const images=content instanceof HTMLImageElement?[]:[...content.querySelectorAll('img')];
+    await Promise.all(images.map(image=>waitForTileImage(image,signal)));
+    if (!signal.aborted && (content instanceof HTMLImageElement
+      ? content.naturalWidth*content.naturalHeight<=1_000_000 : !images.length)) {
+      cache.set(key,content);
+      if (cache.size>96) cache.delete(cache.keys().next().value);
     }
-    let content;
-    try {
-      content=await gridThumbnail({entry,type,api,url,signal,read:()=>response(url),json:async(action,options)=>(await response(api(action,options))).json()});
-      if (!content || signal.aborted) return;
-      attach(content);
-      if (content instanceof HTMLImageElement && !content.complete) {
-        content.addEventListener('load',()=>finish(true),{once:true});
-        content.addEventListener('error',finish,{once:true});
-      }
-    } finally {
-      if (!(content instanceof HTMLImageElement) || content.complete || signal.aborted) {
-        finish(!signal.aborted && Boolean(content) && (!(content instanceof HTMLImageElement) || content.naturalWidth>0));
-      }
-    }
-    function remember() {
-      if (!signal.aborted && (content instanceof HTMLImageElement
-        ? content.naturalWidth*content.naturalHeight<=1_000_000
-        : !content.querySelector('img'))) {
-        cache.set(key,content);
-        if (cache.size>96) cache.delete(cache.keys().next().value);
-      }
-    }
-    if (content instanceof HTMLImageElement && !content.naturalWidth) {
-      content.addEventListener('load',()=>{if (content.naturalWidth) remember();});
-    } else remember();
   }
 }
