@@ -278,10 +278,11 @@ func run(ready, inheritedLock *os.File) error {
 		return startBackground(executable, append([]string{"start"}, args...), stateDir, lock)
 	}
 
-	videoTool, err := videoExecutable(c.FFmpeg)
+	videoTool, removeFFmpeg, err := prepareFFmpeg(c.FFmpeg, stateDir)
 	if err != nil {
 		return err
 	}
+	defer removeFFmpeg()
 	videos := newVideoPreviews(videoTool, c.State)
 	defer videos.cache.clear()
 	protected := []string{c.State, executable}
@@ -291,7 +292,7 @@ func run(ready, inheritedLock *os.File) error {
 	if videoTool != "" {
 		protected = append(protected, videoTool)
 	}
-	for _, name := range []string{"config.json", "config.example.json", "filemanager", "file-manager", "install.sh", languageFile, registeredCommandFile, portableMarker, systemdMarker, "README.md", "LICENSE", "THIRD_PARTY.md", "web", "vendor"} {
+	for _, name := range []string{"config.json", "config.example.json", "filemanager", "file-manager", "install.sh", languageFile, registeredCommandFile, portableMarker, systemdMarker, "README.md", "LICENSE", "THIRD_PARTY.md", "FFMPEG-NOTICE.md", "FFMPEG-COPYING.GPLv2", "web", "vendor"} {
 		internal := filepath.Join(appDir, name)
 		if _, err := os.Stat(internal); err == nil {
 			protected = append(protected, internal)

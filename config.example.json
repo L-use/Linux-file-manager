@@ -4,5 +4,5 @@
   "port": 8080,
   "state_dir": "./state",
   "secure_cookie": false,
-  "ffmpeg": ""
+  "ffmpeg": "bundled"
 }

@@ -73,8 +73,15 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 			"-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
 			"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-threads", "2")
 	}
-	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1", "-c:a", "aac", "-ac", "2",
-		"-fs", strconv.FormatInt(maxSize, 10), "-fd", "4", "-f", "mp4", "fd:")
+	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1")
+	format := "mp4"
+	if audio {
+		format = "mp3"
+		args = append(args, "-c:a", "libmp3lame", "-q:a", "4", "-ac", "2")
+	} else {
+		args = append(args, "-c:a", "aac", "-ac", "2")
+	}
+	args = append(args, "-fs", strconv.FormatInt(maxSize, 10), "-fd", "4", "-f", format, "fd:")
 	command := exec.CommandContext(ctx, v.executable, args...)
 	command.ExtraFiles = []*os.File{input, output}
 	if err := command.Run(); err != nil {
@@ -115,13 +122,13 @@ func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoK
 	if err != nil {
 		return err
 	}
-	mime := "video/mp4"
+	mime, name := "video/mp4", "compatible.mp4"
 	if audio {
-		mime = "audio/mp4"
+		mime, name = "audio/mpeg", "compatible.mp3"
 	}
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	http.ServeContent(w, r, "compatible.mp4", modified, io.NewSectionReader(preview, 0, info.Size()))
+	http.ServeContent(w, r, name, modified, io.NewSectionReader(preview, 0, info.Size()))
 	return nil
 }
 

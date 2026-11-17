@@ -20,8 +20,9 @@ try {
   if (Object.hasOwn(treeSortModes,saved)) treeSort=saved;
 } catch {}
 let root = '', selected = '', current = null, activePreview = null, previewId = 0, generation = 0;
-let loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
+let sessionUser='', loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
 let gridPath=null, selecting=false, bulkBusy=false, gridPreview;
+const gridThumbnails=new Map();
 const marked=new Map();
 
 const parent = (name) => name.includes('/') ? name.slice(0,name.lastIndexOf('/')) : '';
@@ -215,10 +216,12 @@ function showLogin(error='') {
   signedIn=false;
   gridPath=null;
   gridPreview?.abort();
+  gridThumbnails.clear();
   selecting=false;
   marked.clear();
-  $('settings').hidden=true;
-  $('updates').hidden=true;
+  $('settings').hidden=false;
+  $('settings').classList.remove('update-available');
+  sessionUser='';
   stopUpdateReminder();
   updateGridButton();
   liveStatus.stop();
@@ -230,7 +233,6 @@ function showLogin(error='') {
   generation++;
   workspace.hidden=true;
   $('boot').hidden=true;
-  $('account').hidden=true;
   $('toggle-tree').disabled=true;
   $('login-screen').hidden=false;
   loginError=error;
@@ -259,12 +261,11 @@ async function showWorkspace(session) {
   $('login-screen').hidden=true;
   $('boot').hidden=true;
   workspace.hidden=false;
-  $('account').hidden=false;
   $('settings').hidden=false;
-  $('updates').hidden=false;
   startUpdateReminder();
   $('toggle-tree').disabled=false;
-  $('account').querySelector('.account-name').textContent=session.user;
+  sessionUser=session.user;
+  if ($('tools-dialog').open) $('tools-dialog').close();
   setEmpty('emptyTitle','emptyHint');
   renderHeader();
   liveStatus.start();
@@ -524,7 +525,7 @@ function renderGrid() {
   else gridDragSelection(grid,tiles);
   host.replaceChildren(headline,grid);
   grid.scrollTop=prior;
-  mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL);
+  mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL,gridThumbnails);
   translate(host);
 }
 async function openGrid(path=targetDirectory()) {
@@ -1315,12 +1316,11 @@ function startUpdateReminder() {
   poll();
 }
 function paintUpdateNotice(state) {
-  $('updates').classList.toggle('update-available',state.mode!=='manual' && state.available);
+  $('settings').classList.toggle('update-available',state.mode!=='manual' && state.available);
 }
-function openUpdates() {
+function updateSettings(signal) {
   const body=document.createElement('section');
   body.className='settings-body';
-  const controller=new AbortController();
   const feedback=document.createElement('output'), hint=document.createElement('p');
   const details=document.createElement('dl');
   details.className='cache-stats';
@@ -1394,11 +1394,11 @@ function openUpdates() {
     loadingVersions=true;
     paintVersions();
     try {
-      const data=await json('/api/updates/versions?page='+nextPage,{signal:controller.signal});
+      const data=await json('/api/updates/versions?page='+nextPage,{signal:signal});
       for (const tag of data.versions) releases.add(tag);
       nextPage=data.nextPage || 0;
     } catch(error) {
-      if (!controller.signal.aborted) feedback.textContent=errorOf(error);
+      if (!signal.aborted) feedback.textContent=errorOf(error);
     } finally {loadingVersions=false;paintVersions();}
   }
   async function changeMode(mode) {
@@ -1420,10 +1420,10 @@ function openUpdates() {
     check.disabled=true;
     feedback.textContent=t('checkingUpdates');
     try {
-      const data=await json('/api/updates/check',{method:'POST',signal:controller.signal});
+      const data=await json('/api/updates/check',{method:'POST',signal:signal});
       paint(data);
       feedback.textContent=t(data.available?'updateAvailable':data.supported?'updateCurrent':'updateUnsupported',{version:data.latest});
-    } catch(error) {if (!controller.signal.aborted) feedback.textContent=errorOf(error);}
+    } catch(error) {if (!signal.aborted) feedback.textContent=errorOf(error);}
     finally {check.disabled=false;}
   },'button',true);
   const install=makeButton('updateInstall','download',async()=>{
@@ -1447,12 +1447,12 @@ function openUpdates() {
   actions.className='cache-actions';
   actions.append(check,install,moreVersions);
   body.append(details,versionField,actions,feedback,versionsHint,modes,hint);
-  if (!openToolPanel('checkUpdates',body,()=>controller.abort())) return;
   paintVersions();
   loadVersions();
-  json('/api/updates',{signal:controller.signal}).then(paint).catch(error=>{
-    if (!controller.signal.aborted) feedback.textContent=errorOf(error);
+  json('/api/updates',{signal:signal}).then(paint).catch(error=>{
+    if (!signal.aborted) feedback.textContent=errorOf(error);
   });
+  return body;
 }
 async function waitForRestart(feedback,version) {
   for (let attempt=0;attempt<20;attempt++) {
@@ -1469,8 +1469,31 @@ async function waitForRestart(feedback,version) {
   feedback.textContent=t(version?'updateReconnect':'restartReconnect');
 }
 
+function aboutSettings() {
+  const section=document.createElement('section');
+  section.className='settings-about';
+  const title=document.createElement('h3');
+  title.dataset.i18n='settingsAbout';
+  const details=document.createElement('dl');
+  for (const [label,name,url] of [
+    ['projectAddress','github.com/L-use/Linux-file-manager','https://github.com/L-use/Linux-file-manager'],
+    ['projectAuthor','L-use','https://github.com/L-use']
+  ]) {
+    const term=document.createElement('dt'), value=document.createElement('dd'), link=document.createElement('a');
+    term.dataset.i18n=label;
+    link.textContent=name;
+    link.href=url;
+    link.target='_blank';
+    link.rel='noopener noreferrer';
+    value.append(link);
+    details.append(term,value);
+  }
+  section.append(title,details);
+  return section;
+}
+
 let pendingCacheWrite;
-function openSettings() {
+function cacheSettings(signal) {
   const body=document.createElement('section');
   body.className='settings-body';
   const description=document.createElement('p');
@@ -1497,7 +1520,6 @@ function openSettings() {
   limitLabel.append(label,amount);
   const status=document.createElement('output');
   status.setAttribute('aria-live','polite');
-  const controller=new AbortController();
   let snapshot, busy=false, revision=0, timer;
   function paint() {
     amount.textContent=snapshot?slider.value+' MiB':'—';
@@ -1524,11 +1546,15 @@ function openSettings() {
       const request=json(route,options);
       pendingCacheWrite=request;
       const data=await request;
+      if (route==='/api/cache/clear') {
+        gridPreview?.abort();
+        gridThumbnails.clear();
+      }
       slider.value=String(snapshot.limitMiB);
       apply(data);
       status.textContent=t(message);
     } catch(error) {
-      if (!controller.signal.aborted) status.textContent=errorOf(error);
+      if (!signal.aborted) status.textContent=errorOf(error);
     } finally {busy=false;paint();}
   }
   const save=makeButton('cacheSave','check',()=>change('/api/cache',{method:'PUT',body:{limitMiB:Number(slider.value)}},'cacheSaved'),'button',true);
@@ -1538,23 +1564,140 @@ function openSettings() {
   actions.append(save,clear);
   slider.oninput=paint;
   slider.onchange=()=>{if (!save.disabled) save.click();};
-  body.append(rootSettings(controller.signal),description,stats,limitLabel,slider,actions,status);
-  if (!openToolPanel('settings',body,()=>{controller.abort();clearTimeout(timer);})) return;
+  body.append(description,stats,limitLabel,slider,actions,status);
+  signal.addEventListener('abort',()=>clearTimeout(timer),{once:true});
   paint();
   async function refreshStats() {
-    if (!busy) {
+    if (!busy && !body.hidden) {
       const requested=revision;
       try {
         await pendingCacheWrite?.catch(()=>{});
-        const data=await json('/api/cache',{signal:controller.signal});
-        if (!busy && requested===revision && !controller.signal.aborted) apply(data);
+        const data=await json('/api/cache',{signal:signal});
+        if (!busy && requested===revision && !signal.aborted) apply(data);
       } catch(error) {
-        if (!snapshot && !controller.signal.aborted) status.textContent=errorOf(error);
+        if (!snapshot && !signal.aborted) status.textContent=errorOf(error);
       }
     }
-    if (!controller.signal.aborted) timer=setTimeout(refreshStats,1500);
+    if (!signal.aborted) timer=setTimeout(refreshStats,1500);
   }
   refreshStats();
+  return body;
+}
+
+function appearanceSettings() {
+  const section=document.createElement('section');
+  section.className='settings-body settings-appearance';
+  const themeLabel=document.createElement('label');
+  themeLabel.htmlFor='settings-theme';
+  themeLabel.dataset.i18n='settingsTheme';
+  const theme=makeButton('settingsTheme','sun',()=>{
+    const night=document.documentElement.dataset.theme!=='night';
+    applyTheme(night);
+    try {localStorage.setItem('fm-theme',night?'night':'day');} catch {}
+    paintTheme();
+  },'button theme',true);
+  theme.id='settings-theme';
+  function paintTheme() {
+    const night=document.documentElement.dataset.theme==='night';
+    theme.setAttribute('aria-pressed',String(night));
+    theme.querySelector('svg').outerHTML=icon(night?'moon':'sun');
+    theme.querySelector('span').dataset.i18n=night?'nightMode':'dayMode';
+    translate(section);
+  }
+  const languageLabel=document.createElement('label');
+  languageLabel.htmlFor='settings-language';
+  languageLabel.dataset.i18n='settingsLanguage';
+  const choice=document.createElement('select');
+  choice.id='settings-language';
+  for (const [value,name] of [['zh','中文'],['en','English']]) {
+    const option=document.createElement('option');
+    option.value=value;
+    option.textContent=name;
+    choice.append(option);
+  }
+  choice.value=language;
+  choice.onchange=()=>switchLanguage(choice.value);
+  section.append(themeLabel,theme,languageLabel,choice);
+  paintTheme();
+  return section;
+}
+function accountSettings() {
+  const section=document.createElement('section');
+  section.className='settings-body';
+  const name=document.createElement('strong'), feedback=document.createElement('output');
+  name.textContent=sessionUser;
+  feedback.setAttribute('aria-live','polite');
+  const logout=makeButton('logout','logout',async()=>{
+    if (!await reviewEdits()) return;
+    logout.disabled=true;
+    try {await json('/api/logout',{method:'POST'});showLogin();}
+    catch(error) {feedback.textContent=errorOf(error);}
+    finally {logout.disabled=false;}
+  },'button',true);
+  section.append(name,logout,feedback);
+  return section;
+}
+function openSettings() {
+  if ($('tools-dialog').open) return;
+  const controller=new AbortController();
+  const layout=document.createElement('div'), navigation=document.createElement('div'), content=document.createElement('div');
+  layout.className='settings-layout';
+  navigation.className='settings-nav';
+  navigation.setAttribute('role','tablist');
+  navigation.dataset.label='settings';
+  content.className='settings-content';
+  const categories=[['settingsAppearance','sun',appearanceSettings]];
+  if (signedIn) categories.push(
+    ['settingsServer','server',()=>rootSettings(controller.signal)],
+    ['settingsCache','archive',()=>cacheSettings(controller.signal)],
+    ['account','user',accountSettings],
+    ['settingsUpdates','refresh',()=>updateSettings(controller.signal)]
+  );
+  categories.push(['settingsAbout','info',aboutSettings]);
+  const tabs=[], panels=[];
+  function select(index,focus=false) {
+    const [label,,create]=categories[index];
+    if (!panels[index]) {
+      const panel=create();
+      panel.classList.add('settings-tab-panel');
+      panel.setAttribute('role','tabpanel');
+      panel.setAttribute('aria-labelledby','settings-tab-'+label);
+      panel.id='settings-panel-'+label;
+      panels[index]=panel;
+      content.append(panel);
+      translate(panel);
+    }
+    tabs.forEach((tab,i)=>{
+      tab.setAttribute('aria-selected',String(i===index));
+      tab.tabIndex=i===index?0:-1;
+      if (panels[i]) panels[i].hidden=i!==index;
+    });
+    content.scrollTop=0;
+    if (focus) tabs[index].focus();
+  }
+  categories.forEach(([label,glyph],i)=>{
+    const tab=makeButton(label,glyph,()=>select(i),'button',true);
+    tab.setAttribute('role','tab');
+    tab.id='settings-tab-'+label;
+    tab.setAttribute('aria-controls','settings-panel-'+label);
+    tabs.push(tab);
+    navigation.append(tab);
+  });
+  navigation.onkeydown=event=>{
+    const current=tabs.indexOf(event.target);
+    if (current<0) return;
+    let next;
+    if (event.key==='Home') next=0;
+    else if (event.key==='End') next=tabs.length-1;
+    else if (['ArrowLeft','ArrowUp'].includes(event.key)) next=(current+tabs.length-1)%tabs.length;
+    else if (['ArrowRight','ArrowDown'].includes(event.key)) next=(current+1)%tabs.length;
+    else return;
+    event.preventDefault();
+    select(next,true);
+  };
+  layout.append(navigation,content);
+  select(0);
+  openToolPanel('settings',layout,()=>controller.abort());
 }
 
 function openToolPanel(title,content,onClose=()=>{}) {
@@ -2101,40 +2244,23 @@ document.addEventListener('fullscreenchange',()=>{
   if (!isPreviewFullscreen()) closeMenu(false);
   renderFullscreenButton();
 });
-$('account').innerHTML=icon('user')+'<span class="account-name"></span>'+icon('down');
-$('account').onclick=()=>openMenu([['logout','logout',async()=>{
-  if (!await reviewEdits()) return;
-  try {await json('/api/logout',{method:'POST'});showLogin();}catch(e){tell(e);}
-}]],$('account'));
-const themeButton=$('theme');
 function applyTheme(night) {
   const root=document.documentElement;
   if (night) root.dataset.theme='night';
   else delete root.dataset.theme;
-  themeButton.setAttribute('aria-pressed',String(night));
-  themeButton.querySelector('.theme-icon').innerHTML=icon(night?'moon':'sun');
-  themeButton.querySelector('.theme-name').dataset.i18n=night?'nightMode':'dayMode';
   document.querySelector('meta[name="theme-color"]').content=night?'#08110c':'#edf3fc';
-  translate(themeButton);
 }
 
 applyTheme(document.documentElement.dataset.theme==='night');
-themeButton.onclick=()=>{
-  const night=themeButton.getAttribute('aria-pressed')!=='true';
-  applyTheme(night);
-  try {localStorage.setItem('fm-theme',night?'night':'day');} catch {}
-};
-$('language').onclick=()=>{
-  setLanguage(language==='zh'?'en':'zh');
-  for (const [index,span] of [...$('language').querySelectorAll('span')].entries()) span.classList.toggle('active',index===(language==='zh'?0:1));
+function switchLanguage(next) {
+  setLanguage(next);
   if (signedIn) {renderTree();renderHeader();activePreview?.language();liveStatus.render();}
   $('login-error').textContent=loginError?t(loginError):'';
   modal?.();
   if (popup) {renderMenu();menu.firstElementChild?.focus();}
   for (const notice of $('toasts').children) notice.translateMessage();
   paintUpload();
-};
-$('language').querySelectorAll('span')[language==='zh'?0:1].classList.add('active');
+}
 $('login-form').onsubmit=async(e)=>{
   e.preventDefault();
   const form=e.currentTarget, submit=form.querySelector('button[type=submit]');
@@ -2183,8 +2309,6 @@ explorer.ondrop=(e)=>{
 $('refresh').onclick=()=>refresh(true);
 $('settings').innerHTML=icon('settings');
 $('settings').onclick=openSettings;
-$('updates').innerHTML=icon('refresh');
-$('updates').onclick=openUpdates;
 $('open-grid').innerHTML=icon('grid');
 updateGridButton();
 $('open-grid').onclick=()=>{

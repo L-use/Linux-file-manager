@@ -22,4 +22,4 @@ Browser dependencies are bundled with their upstream licenses in `web/vendor`. T
 
 The JavaScript bundles may contain additional components whose notices are included by the corresponding upstream distributions.
 
-The HEIF module source is available from [libheif-js](https://github.com/catdad-experiments/libheif-js) and [libheif](https://github.com/strukturag/libheif). Compatible video previews may call a server-provided [FFmpeg](https://ffmpeg.org/) installation.
+The HEIF module source is available from [libheif-js](https://github.com/catdad-experiments/libheif-js) and [libheif](https://github.com/strukturag/libheif). Linux release builds include a separate [FFmpeg](https://ffmpeg.org/) executable. See [FFMPEG-NOTICE.md](FFMPEG-NOTICE.md) for its license and corresponding sources.

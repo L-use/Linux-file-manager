@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -141,11 +143,37 @@ func (t *thumbnails) serveRaster(s *fileStore, w http.ResponseWriter, r *http.Re
 	if info.Size() > 128<<20 {
 		return failure(413, "rasterLimit")
 	}
+	small := r.URL.Query().Get("thumbnail") == "1"
+	edge := 0
+	if small {
+		edge = 240
+	}
+	key := thumbnailKey{name, version(info), edge}
+	if cached := t.cache.image(key); cached.data != nil {
+		return writeRaster(w, cached.data)
+	}
 	select {
 	case t.decoding <- struct{}{}:
 		defer func() { <-t.decoding }()
 	case <-r.Context().Done():
 		return r.Context().Err()
+	}
+	if cached := t.cache.image(key); cached.data != nil {
+		return writeRaster(w, cached.data)
+	}
+	_, generation := t.cache.budget()
+	store := func(data []byte) error {
+		if len(data) <= 8<<20 {
+			latest, err := descriptorStat(input)
+			if err != nil {
+				return err
+			}
+			if !matches(latest, key.version) {
+				return failure(409, "changed")
+			}
+			t.cache.put(previewCacheEntry{key: key, image: thumbnail{data: data}, size: int64(len(data))}, generation)
+		}
+		return writeRaster(w, data)
 	}
 	var source image.Image
 	if ext == ".dng" {
@@ -161,7 +189,11 @@ func (t *thumbnails) serveRaster(s *fileStore, w http.ResponseWriter, r *http.Re
 		source, err = decodeTIFF(input)
 		var unsupported tiff.UnsupportedError
 		if errors.As(err, &unsupported) && ffmpeg != "" {
-			return compatibleTIFF(r.Context(), w, input, ffmpeg, r.URL.Query().Get("thumbnail") == "1")
+			data, err := compatibleTIFF(r.Context(), input, ffmpeg, small)
+			if err != nil {
+				return err
+			}
+			return store(data)
 		}
 		if err != nil {
 			var issue *problem
@@ -171,16 +203,31 @@ func (t *thumbnails) serveRaster(s *fileStore, w http.ResponseWriter, r *http.Re
 			return failure(415, "mediaError")
 		}
 	}
-	if r.URL.Query().Get("thumbnail") == "1" {
+	if small {
 		bounds := source.Bounds()
 		scale := min(1., 240./float64(max(bounds.Dx(), bounds.Dy())))
 		dest := image.NewRGBA(image.Rect(0, 0, max(1, int(float64(bounds.Dx())*scale)), max(1, int(float64(bounds.Dy())*scale))))
 		draw.ApproxBiLinear.Scale(dest, dest.Bounds(), source, bounds, draw.Src, nil)
 		source = dest
 	}
+	encoder := &png.Encoder{CompressionLevel: png.BestSpeed}
+	dim := source.Bounds()
+	if int64(dim.Dx())*int64(dim.Dy()) <= 2_000_000 {
+		var buffer bytes.Buffer
+		if err := encoder.Encode(&buffer, source); err != nil {
+			return err
+		}
+		return store(buffer.Bytes())
+	}
 	w.Header().Set("Content-Type", "image/png")
-	_ = (&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(w, source)
-	return nil
+	return encoder.Encode(w, source)
+}
+
+func writeRaster(w http.ResponseWriter, data []byte) error {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+	_, err := w.Write(data)
+	return err
 }
 
 func decodeTIFF(input *os.File) (image.Image, error) {
@@ -197,9 +244,9 @@ func decodeTIFF(input *os.File) (image.Image, error) {
 	return tiff.Decode(input)
 }
 
-func compatibleTIFF(ctx context.Context, w http.ResponseWriter, input *os.File, ffmpeg string, small bool) error {
+func compatibleTIFF(ctx context.Context, input *os.File, ffmpeg string, small bool) ([]byte, error) {
 	if _, err := input.Seek(0, io.SeekStart); err != nil {
-		return err
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
@@ -214,9 +261,7 @@ func compatibleTIFF(ctx context.Context, w http.ResponseWriter, input *os.File, 
 	command.ExtraFiles = []*os.File{input}
 	data, err := command.Output()
 	if err != nil || len(data) == 0 || len(data) > 128<<20 {
-		return failure(415, "mediaError")
+		return nil, failure(415, "mediaError")
 	}
-	w.Header().Set("Content-Type", "image/png")
-	_, _ = w.Write(data)
-	return nil
+	return data, nil
 }

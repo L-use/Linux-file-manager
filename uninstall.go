@@ -84,7 +84,7 @@ func deleteProgramState(state *os.File) error {
 	}
 	for _, name := range names {
 		if name != "credentials.json" && name != logFileName && name != controlFileName &&
-			name != previewCacheLimitFile && name != updateModeFile && name != installationSeenFile && !uninstallTemporary(name, ".update-archive-", uploadPrefix+"setting-", ".credential-", ".fm-video-", ".preview-cache-limit-") {
+			name != previewCacheLimitFile && name != updateModeFile && name != installationSeenFile && !uninstallTemporary(name, ".update-archive-", uploadPrefix+"setting-", ".credential-", ".fm-video-", ".preview-cache-limit-", ffmpegTempPrefix) {
 			continue
 		}
 		if err := reportUninstallResult(filepath.Join(state.Name(), name), unix.Unlinkat(int(state.Fd()), name, 0)); err != nil {
@@ -106,7 +106,7 @@ func removePortableArtifacts(appDir string) error {
 			return err
 		}
 		defer store.root.Close()
-		for _, path := range append(licensePaths, "README.md", "LICENSE", "THIRD_PARTY.md", "config.example.json") {
+		for _, path := range append(licensePaths, "README.md", "LICENSE", "THIRD_PARTY.md", "FFMPEG-NOTICE.md", "FFMPEG-COPYING.GPLv2", "config.example.json") {
 			dir, leaf, err := store.parent(path, false)
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ENOTDIR) || errors.Is(err, unix.ELOOP) {
 				continue

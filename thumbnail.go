@@ -49,7 +49,7 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 	}
 	defer f.Close()
 	ext := strings.ToLower(path.Ext(name))
-	if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") || info.Size() < minThumbnailSource || info.Size() > 96<<20 {
+	if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") || (edge != 240 && info.Size() < minThumbnailSource) || info.Size() > 96<<20 {
 		return failure(415, "unsupported")
 	}
 	key := thumbnailKey{name, version(info), edge}

@@ -1242,7 +1242,7 @@ function audioPreview(ctx) {
   let retried=false;
   player.onerror=async()=>{
     if (ctx.signal.aborted) return;
-    if (retried) {ctx.report('mediaError');return;}
+    if (retried) {ctx.report('audioPlaybackError');return;}
     retried=true;
     feedback.hidden=false;
     feedback.textContent=t('convertingAudio');
@@ -1250,7 +1250,12 @@ function audioPreview(ctx) {
       player.src=await ctx.convertVideo();
       waitLive(ctx);
       feedback.hidden=true;
-    } catch(error) {if (!ctx.signal.aborted) ctx.report(error?.error||'mediaError');}
+    } catch(error) {
+      if (!ctx.signal.aborted) {
+        const messages={videoToolMissing:'audioToolMissing',videoBusy:'audioConvertBusy',videoConvertFailed:'audioConvertFailed',videoLimit:'audioConvertLimit'};
+        ctx.report(messages[error?.error] || error?.error || 'audioPlaybackError');
+      }
+    }
   };
   card.append(symbol,name,player,speed,feedback);
   view.append(card);
@@ -1481,10 +1486,16 @@ async function gridThumbnail(ctx) {
       if (raster.has(ext)) return tileImage(ctx.api('raster',{thumbnail:'1'}));
       if (heif.has(ext)) {
         const result=await heifImage(ctx);
-        result.canvas.className='grid-preview-content';
-        return result.canvas;
+        const canvas=node('canvas','grid-preview-content');
+        const original=result.canvas;
+        const scale=Math.min(1,240/Math.max(original.width,original.height));
+        canvas.width=Math.max(1,Math.round(original.width*scale));
+        canvas.height=Math.max(1,Math.round(original.height*scale));
+        canvas.getContext('2d').drawImage(original,0,0,canvas.width,canvas.height);
+        original.width=original.height=0;
+        return canvas;
       }
-      if (ctx.entry.size>=1024*1024 && ['jpg','jpeg','png'].includes(ext)) {
+      if (['jpg','jpeg','png'].includes(ext) && ctx.entry.size<=96*1024*1024) {
         const image=tileImage(ctx.api('thumbnail',{edge:240}));
         image.onerror=()=>{
           image.onerror=()=>image.remove();
@@ -1562,9 +1573,10 @@ async function gridThumbnail(ctx) {
   }
 }
 
-export function mountGridThumbnails(grid,items,signal,route,fileURL) {
+export function mountGridThumbnails(grid,items,signal,route,fileURL,cache) {
   const queue=[], pending=new Map(items.map(item=>[item.element,item]));
   let running=0;
+  const rendered=new Set();
   const observer=new IntersectionObserver(records=>{
     for (const record of records) {
       if (!record.isIntersecting) continue;
@@ -1574,7 +1586,11 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL) {
     }
     pump();
   },{root:grid,rootMargin:'100px'});
-  signal.addEventListener('abort',()=>{observer.disconnect();queue.length=0;pending.clear();},{once:true});
+  signal.addEventListener('abort',()=>{
+    observer.disconnect();queue.length=0;pending.clear();
+    for (const element of rendered) element.remove();
+    rendered.clear();
+  },{once:true});
   for (const item of items) observer.observe(item.element);
   function pump() {
     while (!signal.aborted && running<3 && queue.length) {
@@ -1583,6 +1599,18 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL) {
     }
   }
   async function render({element,entry,type}) {
+    const key=entry.path+'\0'+entry.version;
+    function attach(content) {
+      rendered.add(content);
+      element.append(content);
+    }
+    const previous=cache.get(key);
+    if (previous) {
+      cache.delete(key);
+      cache.set(key,previous);
+      attach(previous);
+      return;
+    }
     const api=(action,options)=>route(action,entry.path,options);
     const url=fileURL(entry.path);
     const response=async address=>{
@@ -1591,6 +1619,18 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL) {
       return result;
     };
     const content=await gridThumbnail({entry,type,api,url,signal,read:()=>response(url),json:async(action,options)=>(await response(api(action,options))).json()});
-    if (content && !signal.aborted) element.append(content);
+    if (!content || signal.aborted) return;
+    attach(content);
+    function remember() {
+      if (!signal.aborted && (content instanceof HTMLImageElement
+        ? content.naturalWidth*content.naturalHeight<=1_000_000
+        : !content.querySelector('img'))) {
+        cache.set(key,content);
+        if (cache.size>96) cache.delete(cache.keys().next().value);
+      }
+    }
+    if (content instanceof HTMLImageElement && !content.naturalWidth) {
+      content.addEventListener('load',()=>{if (content.naturalWidth) remember();});
+    } else remember();
   }
 }

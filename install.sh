@@ -338,7 +338,7 @@ if [ ! -f "$config" ]; then
   staged_config=$(mktemp "$install_dir/.config.XXXXXXXX")
   if [ "$custom_config" = true ]; then
     root_json=$(printf '%s' "$managed_root" | sed 's/[\\"]/\\&/g')
-    printf '{\n  "root": "%s",\n  "host": "0.0.0.0",\n  "port": %s,\n  "state_dir": "./state",\n  "secure_cookie": false,\n  "ffmpeg": ""\n}\n' "$root_json" "$port" > "$staged_config"
+    printf '{\n  "root": "%s",\n  "host": "0.0.0.0",\n  "port": %s,\n  "state_dir": "./state",\n  "secure_cookie": false,\n  "ffmpeg": "bundled"\n}\n' "$root_json" "$port" > "$staged_config"
   else
     cat "$work/config.json" > "$staged_config"
   fi

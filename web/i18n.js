@@ -1,4 +1,9 @@
 const strings = {
+ settingsAppearance:['外观与语言','Appearance & language'], settingsTheme:['主题','Theme'], settingsLanguage:['界面语言','Interface language'],
+ settingsServer:['服务器','Server'], settingsCache:['预览缓存','Preview cache'], settingsUpdates:['软件更新','Updates'],
+
+ settingsAbout:['关于','About'], projectAddress:['项目地址','Project repository'], projectAuthor:['作者','Author'],
+
  archiveReadError:['无法读取压缩包，可能已加密或损坏。','The archive could not be read. It may be encrypted or damaged.'],
  archivePreviewLimit:['压缩包超出预览大小限制。','The archive exceeds the preview size limit.'],
  archivePreviewPartial:['这里只显示扫描范围内的条目。','Only entries within the scan limit are shown.'],
@@ -9,6 +14,11 @@ const strings = {
  rasterLimit:['图片超出预览大小限制。','The image exceeds the preview size limit.'],
  dngNoPreview:['此 DNG 没有可读取的内嵌 JPEG 预览。','This DNG has no readable embedded JPEG preview.'],
  textEncoding:['文本编码','Text encoding'], encodingAuto:['自动 · {encoding}','Auto · {encoding}'],
+ audioToolMissing:['浏览器无法直接播放此音频。请在服务器配置 FFmpeg 以转换后播放。','This browser cannot play the audio directly. Configure FFmpeg on the server to convert it.'],
+ audioConvertBusy:['服务器正在转换另一份媒体文件，请稍后重试。','The server is converting another media file. Try again shortly.'],
+ audioConvertFailed:['FFmpeg 无法转换此音频。你仍可下载原文件。','FFmpeg could not convert this audio. You can still download the original file.'],
+ audioConvertLimit:['音频转换超出预览限制。','Audio conversion exceeded the preview limit.'],
+ audioPlaybackError:['无法播放此音频。','The audio could not be played.'],
  playbackSpeed:['播放速度','Playback speed'], convertingAudio:['正在转换音频…','Converting audio…'],
 
  restartService:['重启服务','Restart service'],
@@ -39,14 +49,14 @@ const strings = {
  updating:['正在下载并校验更新…','Downloading and verifying the update…'], updateRestarting:['服务正在重启…','Restarting the service…'],
  updateReconnect:['请刷新页面查看版本，或检查服务日志。','Refresh to check the version, or inspect the service log.'],
 
- cacheTotal:['缓存用量','Cache usage'], cacheThumbnails:['图片缩略图','Image thumbnails'], cacheVideos:['视频转码','Converted videos'],
+ cacheTotal:['缓存用量','Cache usage'], cacheThumbnails:['图片预览与封面','Image previews and posters'], cacheVideos:['音视频转码','Converted audio and video'],
  cacheLimit:['最大缓存容量','Maximum cache size'], cacheSave:['保存容量','Save limit'], cacheSaved:['缓存容量已保存。','Cache limit saved.'],
 
  settings:['设置','Settings'], largeIcons:['大图标','Large icons'], parentFolder:['返回上一级','Parent folder'],
  selectMany:['多选','Select multiple'], selectItem:['选择「{name}」','Select “{name}”'], selectedItems:['已选 {count} 项','{count} selected'],
  deleteManyQuestion:['将 {count} 项移入回收站？','Move {count} items to the recycle bin?'],
  bulkResult:['已移入回收站 {removed} 项，失败 {failed} 项。','Moved {removed} items to the recycle bin. {failed} failed.'],
- clearCache:['清除预览缓存','Clear preview cache'], cacheHelp:['清除服务器生成的缩略图和视频转码缓存。下次预览时按需重新生成。正在播放的转码视频可能需要重新打开。','Clear server-generated thumbnails and converted videos. They are regenerated as needed. Converted videos that are playing may need to be reopened.'],
+ clearCache:['清除预览缓存','Clear preview cache'], cacheHelp:['用量统计的是服务器生成的图片预览、封面和音视频转码。浏览器生成的缩略图在本次登录内复用。清除后会按需重新生成。','Usage covers server-generated image previews, posters, and converted audio and video. Browser-generated thumbnails are reused during this sign-in. Previews are regenerated as needed after clearing.'],
  cacheCleared:['预览缓存已清除。','Preview cache cleared.'], serverNetwork:['网络','Network'], serverOffline:['离线','Offline'],
 
  dayMode:['白昼','Day'], nightMode:['黑夜','Night'], nightTheme:['黑夜模式','Night mode'],
@@ -93,7 +103,7 @@ const strings = {
  detailPartial:['仅显示已扫描部分。可能有无权读取的内容，或已达到扫描上限。','Partial results. Some entries may be inaccessible, or the scan limit was reached.'],
  download:['下载','Download'], connected:['已连接服务器','Connected'], resize:['调整目录树宽度','Resize explorer'],
  close:['关闭','Close'], cancel:['取消','Cancel'], confirm:['确认','Confirm'], logout:['退出登录','Sign out'],
- account:['用户菜单','Account menu'], loginTitle:['登录到服务器','Sign in to the server'], loginHelp:['使用服务器终端中设置的管理员账号登录。','Use the administrator account configured in the server terminal.'],
+ account:['账号','Account'], loginTitle:['登录到服务器','Sign in to the server'], loginHelp:['使用服务器终端中设置的管理员账号登录。','Use the administrator account configured in the server terminal.'],
  username:['账号','Username'], password:['密码','Password'], login:['登录','Sign in'],
  loading:['正在加载…','Loading…'], emptyTitle:['选择文件以预览','Select a file to preview'],
  emptyHint:['在左侧资源管理器中打开文件。','Open a file from the explorer.'], emptyFolder:['此目录为空','This folder is empty'],

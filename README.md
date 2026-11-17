@@ -66,7 +66,7 @@ The program reads `config.json` beside the executable. Relative paths are resolv
   "port": 8080,
   "state_dir": "./state",
   "secure_cookie": false,
-  "ffmpeg": ""
+  "ffmpeg": "bundled"
 }
 ```
 
@@ -76,7 +76,7 @@ For automation, use `filemanager start`, `filemanager stop`, or `filemanager -re
 
 ### Video compatibility
 
-Set `"ffmpeg": "/usr/bin/ffmpeg"` in the configuration, or pass `--ffmpeg /usr/bin/ffmpeg`. Use the actual executable path. FFmpeg needs the `fd` protocol, `libx264`, and an AAC encoder. Check with `ffmpeg -h protocol=fd` and `ffmpeg -encoders`.
+The Linux amd64 and arm64 release packages embed FFmpeg. The default `"ffmpeg": "bundled"` selects the embedded copy. An empty value in an existing configuration still selects it. If you prefer a different build, set `"ffmpeg": "/usr/bin/ffmpeg"` or pass `--ffmpeg /usr/bin/ffmpeg`. That build needs the `fd` protocol and the AAC, libx264, and libmp3lame encoders.
 
 The browser plays supported files at their original quality. For formats it cannot decode, including some MOV, MKV, AVI, WMV, MPEG, TS, FLV, and 3GP files, the server attempts to create a seekable H.264/AAC MP4 preview up to 1080p. It handles one conversion at a time, with a ten-minute timeout and an output limit of 512 MiB or the configured cache limit, whichever is lower. Downloads always provide the original file.
 
@@ -94,7 +94,7 @@ Configure a certificate and allow incoming connections to the HTTPS port. The pr
 
 ### Upgrading
 
-Use the Check for updates button in the top bar to check manually, receive update reminders, or automatically install the latest stable release. The version list lets you install compatible historical releases. Manually installing a historical release switches automatic installation to manual. In-app installation requires a versioned Linux release, server access to GitHub, and write access to the program directory. It verifies the archive checksum and restarts the service. The Settings gear lets you change the managed directory in `config.json`. Select Restart service beside the directory setting to apply it. The listening port is configured separately in the file.
+Use Check for updates under Settings → Updates to check manually, receive update reminders, or automatically install the latest stable release. The version list lets you install compatible historical releases. Manually installing a historical release switches automatic installation to manual. In-app installation requires a versioned Linux release, server access to GitHub, and write access to the program directory. It verifies the archive checksum and restarts the service. The Settings gear lets you change the managed directory in `config.json`. Select Restart service beside the directory setting to apply it. The listening port is configured separately in the file.
 
 1. Stop the existing service. If the previous version runs in the foreground, press Ctrl+C in its terminal.
 2. Extract the new ZIP to a temporary directory. Replace the installed `filemanager` executable and run `chmod +x filemanager`. Keep your existing `config.json` and `state/`. If you previously configured the root and port with flags, you can copy the new `config.json` and put those settings in it.
@@ -114,18 +114,19 @@ Use the Check for updates button in the top bar to check manually, receive updat
 - **Filesystem boundaries** · Access is limited by the configured root and the service user's Linux permissions. Traversal through symbolic links is blocked, while a link itself can be renamed, moved, or deleted. Application files and private state paths are protected. Replacement is limited to regular files. Moving uses atomic filesystem renames and fails across filesystems. Concurrent changes or system errors during recursive removal may require checking the remaining files from the command line.
 
 - **Additional previews** · MP3, M4A, AAC, WAV, FLAC, and OGG/Opus play with speed controls. ZIP, TAR, TAR.GZ, 7z, and RAR can be browsed without extraction. ZIP members can be downloaded individually. PPTX supports page-by-page viewing of text and embedded images. SVG supports image and source views, TIFF shows the first image, and DNG shows its embedded JPEG when present. Large Icons shows real video frames and content thumbnails where the file can be decoded.
-- **Compatibility** · When FFmpeg is installed and available in the server's PATH, it can supply audio/video conversion, fallback video posters, and some TIFF decoders. Set `ffmpeg` explicitly if the service uses a different PATH. PPTX complex layouts and animations may differ. Encrypted archives and DNG files without a readable embedded preview can still be downloaded.
+- **Compatibility** · Bundled FFmpeg supplies audio and video conversion, fallback video posters, and additional TIFF decoders. PPTX complex layouts and animations may differ. Encrypted archives and DNG files without a readable embedded preview can still be downloaded.
 
 ### Build from source
 
-Install Go 1.25 or newer, `tar`, `zip`, and `sh` on the build machine. Required Go modules and web assets are included for offline builds.
+Install Go 1.25 or newer, `tar`, `zip`, and `sh` on the build machine. Go modules and web assets are vendored. For a full Linux release, extract `ffmpeg-source.tar.gz` into an FFmpeg source directory and build the bundled binaries with Docker.
 
 ```sh
 go test -mod=vendor ./...
-./build.sh
+./build-ffmpeg.sh ./ffmpeg-source ./ffmpeg-dist
+FFMPEG_SOURCE_DIR="$PWD/ffmpeg-source" ./build.sh
 ```
 
-The generated archives, installer, and SHA-256 checksums are in `dist/`. To build just the executable for the local platform, run `go build -mod=vendor -o filemanager .`.
+The generated archives, installer, FFmpeg corresponding source bundle, and SHA-256 checksums are in `dist/`. Local Linux packages include versioned filenames such as `file-manager-linux-amd64-v27.0.2.zip`. To build just the executable for the local platform, run `go build -mod=vendor -o filemanager .`.
 
 ### License
 
@@ -201,7 +202,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
   "port": 8080,
   "state_dir": "./state",
   "secure_cookie": false,
-  "ffmpeg": ""
+  "ffmpeg": "bundled"
 }
 ```
 
@@ -215,7 +216,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 
 ### 兼容视频预览
 
-服务器已有 FFmpeg 时，可在原启动命令后加 `--ffmpeg /usr/bin/ffmpeg`（改成实际路径），或在配置文件中设置 `"ffmpeg": "/usr/bin/ffmpeg"`。FFmpeg 需要支持 `fd` 协议、`libx264` 和 AAC 编码。命令 `ffmpeg -h protocol=fd`、`ffmpeg -encoders` 可用于核查。
+Linux amd64 和 arm64 发布包已内置 FFmpeg，默认配置 `"ffmpeg": "bundled"` 使用内置版本，旧配置留空也会使用内置版本。需要指定其他构建时，可设置 `"ffmpeg": "/usr/bin/ffmpeg"` 或传入 `--ffmpeg /usr/bin/ffmpeg`。自选构建需支持 `fd` 协议和 AAC、libx264、libmp3lame 编码器。
 
 浏览器能解码的视频直接播放原文件。对浏览器无法解码的 MOV、MKV、AVI、WMV、MPEG、TS、FLV、3GP 等文件，程序尝试生成 H.264/AAC MP4 预览。兼容预览最高 1080p，生成后可跳转。每次运行最多同时转换一个视频，单次转换上限为 10 分钟，输出上限为 512 MiB 与所设置缓存容量中的较小值。下载始终提供原文件。
 
@@ -233,7 +234,7 @@ files.example.com {
 
 ### 更新程序
 
-顶栏的「检查更新」可选择手动检查、有新版本时提醒或自动安装最新正式版。版本列表可以选择安装与服务器架构兼容的历史版本。手动安装历史版本时，自动安装会切换为手动。程序内更新需要使用带版本号的 Linux 发布包，服务器能访问 GitHub，运行账号能写入程序目录。安装会先校验发布包，然后重启服务。通过齿轮「设置」可修改 `config.json` 的管理目录，保存后点击旁边的「重启服务」即可生效。监听端口仍在配置文件中单独设置。
+「设置 → 软件更新」中的「检查更新」可选择手动检查、有新版本时提醒或自动安装最新正式版。版本列表可以选择安装与服务器架构兼容的历史版本。手动安装历史版本时，自动安装会切换为手动。程序内更新需要使用带版本号的 Linux 发布包，服务器能访问 GitHub，运行账号能写入程序目录。安装会先校验发布包，然后重启服务。通过齿轮「设置」可修改 `config.json` 的管理目录，保存后点击旁边的「重启服务」即可生效。监听端口仍在配置文件中单独设置。
 
 1. 停止旧服务。旧版以前台方式运行时，到其终端按 Ctrl+C。
 2. 将新 ZIP 解压到临时目录，把新的 `filemanager` 可执行文件复制到原安装目录并执行 `chmod +x filemanager`。保留已有的 `config.json` 和 `state/`。如果原来靠命令行指定管理目录和端口，可复制新版 `config.json` 到原目录，并把旧命令的设置填进去。
@@ -241,7 +242,7 @@ files.example.com {
 
 ### 使用和限制
 
-- 顶栏的主题按钮在白昼和黑夜之间切换。主题选择保存在当前浏览器。
+- 在「设置 → 外观与语言」中切换白昼和黑夜。主题选择保存在当前浏览器。
 - 大图标视图显示图片缩略图，可从文件卡片拖动框选并批量移入回收站。视频进度条以灰色显示已缓冲范围、蓝色显示已播放进度。设置页可查看、清理预览缓存，并将容量上限设为 64 MiB 至 4 GiB，默认 1 GiB，重启后保留。
 
 - 右键「移至回收站」后可立即撤销，也可从左下角「回收站」恢复。恢复只使用原路径，遇到同名条目会提示冲突。永久删除在回收站中单独确认。回收站保存在状态目录下，状态目录与待删除文件必须位于同一文件系统。跨文件系统时，移入回收站会失败并保留原件。
@@ -263,18 +264,19 @@ files.example.com {
 - 覆盖只适用于普通文件。移动使用文件系统原子的重命名，同一根内跨文件系统的移动会提示失败。与其他 Linux 进程共享目录时，程序在变更前检查文件版本。Linux 可在检查后继续并发修改目录。从回收站永久删除目录前会核查可访问性，递归删除过程中如有外部变更或系统错误，可能需要通过命令行检查剩余内容。
 
 - **新增预览格式** · MP3、M4A、AAC、WAV、FLAC 和 OGG/Opus 支持播放与倍速。ZIP、TAR、TAR.GZ、7z、RAR 可直接查看条目，其中 ZIP 支持单个成员下载。PPTX 可逐页查看文字和图片。SVG 可切换图片与源码，TIFF 显示首张图像，DNG 显示内嵌 JPEG。大图标模式会为可解码的文件显示内容缩略图，并用实际视频帧作为视频封面。
-- **兼容性** · 服务器 PATH 中的 FFmpeg 可提供兼容音视频、后备视频封面及部分 TIFF 的解码。如服务使用其他 PATH，可在配置中明确指定 FFmpeg。PPTX 的复杂排版和动画可能有差异。加密压缩包和没有可读内嵌预览的 DNG 可下载原文件。
+- **兼容性** · 随包 FFmpeg 提供音视频兼容转换、后备视频封面和部分 TIFF 的解码。PPTX 的复杂排版和动画可能有差异。加密压缩包和没有可读内嵌预览的 DNG 可下载原文件。
 
 ### 从源码构建
 
-在构建机安装 Go 1.25 或更新版本、`tar`、`zip` 和 `sh`。源树内已包含所需 Go 模块和网页组件，可离线构建。
+在构建机安装 Go 1.25 或更新版本、`tar`、`zip` 和 `sh`。源树内有 Go 模块和网页组件。要构建完整 Linux 发布包，先解压 `ffmpeg-source.tar.gz`，然后用 Docker 构建两个架构的 FFmpeg。
 
 ```sh
 go test -mod=vendor ./...
-./build.sh
+./build-ffmpeg.sh ./ffmpeg-source ./ffmpeg-dist
+FFMPEG_SOURCE_DIR="$PWD/ffmpeg-source" ./build.sh
 ```
 
-两个离线 ZIP、两个在线安装包、源码 ZIP、安装脚本和 SHA-256 校验清单位于 `dist/`。本地单独构建可用 `go build -mod=vendor -o filemanager .`。第三方信息见 `THIRD_PARTY.md`。
+两个离线 ZIP、两个在线安装包、源码 ZIP、安装脚本、FFmpeg 对应源码包和 SHA-256 校验清单位于 `dist/`。本地 Linux 安装包另有带版本号的文件名，例如 `file-manager-linux-amd64-v27.0.2.zip`。本地单独构建可用 `go build -mod=vendor -o filemanager .`。第三方信息见 `THIRD_PARTY.md`。
 
 ### 许可证
 

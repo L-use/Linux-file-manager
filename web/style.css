@@ -424,7 +424,8 @@ a.button:visited{color:inherit}
 .settings-section button{justify-self:start}
 .update-modes{width:100%;margin:0;padding:10px;border:1px solid var(--line);border-radius:8px}
 .update-modes label{display:flex;align-items:center;gap:8px;margin:5px 0}
-#updates.update-available{color:var(--blue-dark);box-shadow:inset 0 0 0 1px var(--blue)}
+#settings.update-available{position:relative;color:var(--blue-dark)}
+#settings.update-available::after{content:"";position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .media-conversion.original-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;max-width:calc(100% - 20px)}
 .original-status progress{width:clamp(55px,16vw,150px);height:8px;accent-color:var(--blue)}
 
@@ -475,3 +476,28 @@ a.button:visited{color:inherit}
 .slide-thumb[aria-current]{border-color:var(--blue)}
 .slide-thumb-preview{display:grid;place-items:center;width:100%;height:38px;overflow:hidden}
 .slide-thumb-preview .slide-page{width:100%;max-height:100%;box-shadow:none}
+
+.settings-about{width:100%;padding-top:12px;border-top:1px solid var(--line)}
+.settings-about h3{margin:0 0 8px;font-size:inherit}
+.settings-about dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 12px;margin:0}
+.settings-about dt{color:var(--muted)}
+.settings-about dd{margin:0;overflow-wrap:anywhere}
+.settings-about a{color:var(--blue-dark)}
+
+.tools-dialog:has(.settings-layout){width:min(680px,calc(100vw - 24px));max-width:none}
+.settings-layout{display:grid;grid-template-columns:auto minmax(0,1fr);min-height:min(310px,65dvh);border-top:1px solid var(--line)}
+.settings-nav{display:flex;flex-direction:column;align-items:stretch;gap:4px;padding:10px 10px 10px 0;border-right:1px solid var(--line)}
+.settings-nav .button{justify-content:flex-start}
+.settings-nav .button[aria-selected=true]{background:color-mix(in srgb,var(--blue) 14%,transparent);color:var(--blue-dark)}
+.settings-content{min-width:0;max-height:64dvh;overflow:auto}
+.settings-tab-panel.settings-section,.settings-tab-panel.settings-about{padding:16px;border:0}
+.settings-appearance label{font-weight:650}
+.settings-appearance .theme{width:auto;padding-inline:10px}
+.settings-appearance select{max-width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:7px;background:Canvas;color:CanvasText}
+@media(max-width:580px){
+ .settings-layout{grid-template-columns:minmax(0,1fr);align-content:start}
+ .settings-nav{flex-direction:row;overflow-x:auto;padding:6px 0;border-right:0;border-bottom:1px solid var(--line)}
+ .settings-nav .button{flex:none}
+ .settings-content{max-height:62dvh}
+ .settings-tab-panel.settings-section,.settings-tab-panel.settings-about,.settings-tab-panel.settings-body{padding:12px}
+}

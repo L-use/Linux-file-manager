@@ -2,3 +2,7 @@
 /.release.*/
 /state/
 /file-manager
+
+/ffmpeg-bundle/
+/ffmpeg-dist/
+/ffmpeg-sources/
