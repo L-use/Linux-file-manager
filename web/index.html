@@ -19,6 +19,7 @@
     <button id="theme" class="button theme" type="button" data-label="nightTheme" aria-pressed="false"><span class="theme-icon"></span><span class="theme-name" data-i18n="dayMode"></span></button>
     <button id="language" class="button language" title="中文 / English"><span>中文</span><span>English</span></button>
     <button id="account" class="button" data-label="account" aria-haspopup="menu" hidden></button>
+    <button id="settings" class="icon-button" type="button" data-label="settings" hidden></button>
   </div>
 </header>
 
@@ -37,6 +38,7 @@
     </header>
     <div class="search-wrap"><span id="search-icon"></span><input id="search" type="search" data-placeholder="search" data-label="search" autocomplete="off"><button id="search-deep" class="icon-button" data-label="searchSubtree"></button></div>
     <div id="tree" class="tree"></div>
+    <div class="explorer-selection"><button id="select-many" class="button" type="button" aria-pressed="false" data-i18n="selectMany"></button><span id="bulk-count" aria-live="polite"></span><button id="bulk-delete" class="button" type="button" data-i18n="delete" hidden></button></div>
     <div class="explorer-footer"><span id="folders-icon"></span><span id="item-count"></span><button id="show-hidden" class="icon-button" type="button" data-label="showHidden" aria-pressed="false"></button><button id="open-trash" class="button" data-label="trash"><span data-i18n="trash"></span></button></div>
     <input type="file" id="files" multiple hidden>
     <input type="file" id="folder-files" webkitdirectory multiple hidden>
@@ -46,6 +48,7 @@
     <div class="tabbar"><div id="tab" class="tab"></div></div>
     <header class="filebar">
       <nav id="breadcrumb" class="breadcrumb" data-label="path"></nav>
+      <button id="open-grid" class="icon-button" type="button" data-label="largeIcons"></button>
       <div class="file-actions" id="file-actions" hidden>
         <span id="file-size" class="file-size"></span>
         <a id="download" class="button download" data-label="download" download><span data-i18n="download"></span></a>
@@ -59,7 +62,7 @@
   <footer class="statusbar">
     <span class="connection"><i></i><span data-i18n="connected"></span></span>
     <button class="server-summary" id="server-summary" type="button" aria-controls="server-overlay" aria-expanded="false" data-label="serverStatus">
-      <span id="live-memory">—</span><span id="live-disk">—</span><span id="live-uptime">—</span>
+      <span id="live-network">—</span><span id="live-memory">—</span><span id="live-disk">—</span><span id="live-uptime">—</span>
     </button>
     <span id="status-details" class="status-details"></span>
   </footer>
@@ -68,7 +71,7 @@
     <div class="server-metrics">
       <div class="server-metric"><strong data-i18n="serverMemory"></strong><div class="server-ring"><span id="overlay-memory"></span></div><small id="memory-amount"></small></div>
       <div class="server-metric"><strong data-i18n="serverDisk"></strong><div class="server-ring disk-ring"><span id="overlay-disk"></span></div><small id="disk-amount"></small></div>
-      <div class="server-metric server-uptime"><strong data-i18n="serverUptime"></strong><span id="overlay-uptime"></span></div>
+      <div class="server-metric server-uptime"><strong data-i18n="serverUptime"></strong><span id="overlay-uptime"></span><small id="overlay-network"></small></div>
     </div>
     <div class="service-heading"><h3 id="services-title" data-i18n="serverServices"></h3><span id="services-count"></span></div>
     <div id="services-body"></div>

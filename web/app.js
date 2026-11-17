@@ -21,6 +21,8 @@ try {
 } catch {}
 let root = '', selected = '', current = null, activePreview = null, previewId = 0, generation = 0;
 let loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
+let gridPath=null, selecting=false, bulkBusy=false;
+const marked=new Map();
 
 const parent = (name) => name.includes('/') ? name.slice(0,name.lastIndexOf('/')) : '';
 const join = (directory,name) => directory ? directory + '/' + name : name;
@@ -211,6 +213,11 @@ function setDrawer(open) {
 
 function showLogin(error='') {
   signedIn=false;
+  gridPath=null;
+  selecting=false;
+  marked.clear();
+  $('settings').hidden=true;
+  updateGridButton();
   liveStatus.stop();
   cancelUpload();
   uploadResult=null;
@@ -250,6 +257,7 @@ async function showWorkspace(session) {
   $('boot').hidden=true;
   workspace.hidden=false;
   $('account').hidden=false;
+  $('settings').hidden=false;
   $('toggle-tree').disabled=false;
   $('account').querySelector('.account-name').textContent=session.user;
   setEmpty('emptyTitle','emptyHint');
@@ -358,6 +366,7 @@ function renderTree(focusPath) {
         neighbor?.querySelector('.tree-main')?.focus();
       }
     };
+    if (selecting && !isRoot) node.append(selectionCheckbox(entry));
     node.append(button);
     const more=makeButton('more','more',()=>itemMenu(entry,more),'icon-button tree-more');
     more.setAttribute('aria-haspopup','menu');
@@ -375,12 +384,110 @@ function renderTree(focusPath) {
   row(rootEntry(),0,true);
   if (filter && cache.has('') && !cache.get('').some(matches)) fragment.append(directoryNote('noMatches',1));
   tree.replaceChildren(fragment);
+  updateBulkActions();
   $('item-count').textContent=t('itemCount',{n:count});
   translate(tree);
   newFocus?.focus({preventScroll:true});
+  renderGrid();
+}
+function selectionCheckbox(entry) {
+  const box=document.createElement('input');
+  box.type='checkbox';
+  box.className='row-selection';
+  box.checked=marked.has(entry.path);
+  box.setAttribute('aria-label',t('selectItem',{name:entry.name}));
+  box.onchange=()=>{
+    if (box.checked) marked.set(entry.path,entry);
+    else marked.delete(entry.path);
+    for (const other of document.querySelectorAll('.row-selection')) {
+      if (other.dataset.path===entry.path) other.checked=box.checked;
+    }
+    updateBulkActions();
+  };
+  box.dataset.path=entry.path;
+  return box;
+}
+function updateBulkActions() {
+  $('bulk-delete').hidden=!selecting;
+  $('bulk-delete').disabled=!marked.size || bulkBusy;
+  $('bulk-count').textContent=selecting?t('selectedItems',{count:marked.size}):'';
+  $('select-many').disabled=bulkBusy;
+  $('select-many').setAttribute('aria-pressed',String(selecting));
+}
+function updateGridButton() {
+  const button=$('open-grid');
+  button.setAttribute('aria-pressed',String(gridPath!==null));
+}
+function renderGrid() {
+  if (gridPath===null || current) return;
+  updateGridButton();
+  const host=$('preview-host');
+  const prior=host.querySelector('.file-grid')?.scrollTop || 0;
+  const entries=cache.get(gridPath);
+  const error=directoryErrors.get(gridPath);
+  if (!entries || error) {setEmpty(error||'loading','',null,!error);return;}
+  const headline=document.createElement('div');
+  headline.className='grid-head';
+  const location=document.createElement('strong');
+  location.className='truncate';
+  location.textContent=location.title=absolute(gridPath);
+  headline.append(location);
+  if (gridPath) headline.prepend(makeButton('parentFolder','chevron',()=>openGrid(parent(gridPath))));
+  const grid=document.createElement('div');
+  grid.className='file-grid';
+  const filter=search.value.trim().toLocaleLowerCase();
+  for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && item.name.toLocaleLowerCase().includes(filter)))) {
+    const tile=document.createElement('div');
+    tile.className='file-tile';
+    const type=fileType(entry);
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='tile-open';
+    button.title=entry.name;
+    const preview=document.createElement('span');
+    preview.className='tile-preview type-'+type.style;
+    preview.innerHTML=icon(type.icon);
+    if (type.style==='image' && ['jpg','jpeg','png','gif','avif','webp','bmp'].includes(type.ext)) {
+      const small=entry.size<1024*1024;
+      if (small || ['jpg','jpeg','png'].includes(type.ext)) {
+        const image=document.createElement('img');
+        image.loading='lazy';image.decoding='async';image.alt='';
+        image.src=small?fileURL(entry.path):query('thumbnail',entry.path,{edge:240});
+        image.onerror=()=>image.remove();
+        preview.append(image);
+      }
+    }
+    const name=document.createElement('span');
+    name.className='truncate';
+    name.textContent=entry.name;
+    button.append(preview,name);
+    button.onclick=()=>entry.kind==='directory'?openGrid(entry.path):showFile(entry);
+    tile.append(button,makeButton('more','more',event=>itemMenu(entry,event.currentTarget),'icon-button tile-more'));
+    if (selecting) tile.append(selectionCheckbox(entry));
+    tile.oncontextmenu=event=>{event.preventDefault();itemMenu(entry,button,{x:event.clientX,y:event.clientY});};
+    grid.append(tile);
+  }
+  if (!grid.children.length) grid.append(directoryNote(filter?'noMatches':'emptyFolder',0));
+  host.replaceChildren(headline,grid);
+  grid.scrollTop=prior;
+  translate(host);
+}
+async function openGrid(path=targetDirectory()) {
+  if (current && !await reviewEdits()) return;
+  if (current) closePreview(true);
+  gridPath=path;
+  selected=path;
+  closeMenu(false);
+  setDrawer(false);
+  renderTree();
+  if (!cache.has(path) || directoryErrors.has(path)) {
+    await loadDirectory(path);
+    if (gridPath===path) renderGrid();
+  }
 }
 async function toggleDirectory(entry) {
   const path=entry.path;
+  if (gridPath!==null) {await openGrid(path);return;}
   selected=path;
   if (expanded.has(path) && !directoryErrors.has(path)) {
     expanded.delete(path);
@@ -449,6 +556,7 @@ async function refresh(notify=false) {
       }
     }
   }
+  while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
   renderTree();
   if (notify) {
     if (directoryErrors.has('')) tell({error:directoryErrors.get('')});
@@ -557,6 +665,8 @@ async function closePreview(discardApproved=false) {
 }
 async function showFile(entry, options={}) {
   if (!options.discardApproved && unsaved() && !await reviewEdits()) return;
+  gridPath=null;
+  updateGridButton();
   const id=++previewId;
   activePreview?.destroy();
   current=entry;
@@ -1015,6 +1125,60 @@ async function deleteEntry(entry) {
     await refresh();
     toast('trashMoved',{name:entry.name},false,{id:item.id,label:'undo',icon:'restore',run:()=>changeTrash(item,'restore')});
   } catch(e) {tell(e);}
+}
+
+async function deleteMarked() {
+  if (bulkBusy || !marked.size) return;
+  bulkBusy=true;
+  updateBulkActions();
+  try {
+    const entries=[...marked.values()].filter(entry=>{
+      for (let path=parent(entry.path);path;path=parent(path)) if (marked.has(path)) return false;
+      return true;
+    });
+    const decision=current && entries.some(entry=>containsPath(entry.path,current.path))?await reviewEdits():'clean';
+    if (!decision) return;
+    if (!await promptDialog({title:'deleteManyQuestion',values:{count:entries.length},message:entries.some(entry=>entry.kind==='directory')?'deleteDirectory':'',submit:'delete',danger:true})) return;
+    let removed=0, firstError;
+    for (let entry of entries) {
+      try {
+        if (decision==='saved' && current && containsPath(entry.path,current.path)) entry=await json(query('stat',entry.path));
+        await action({action:'delete',path:entry.path,version:entry.version});
+        removed++;
+        for (const path of marked.keys()) if (containsPath(entry.path,path)) marked.delete(path);
+        if (current && containsPath(entry.path,current.path)) closePreview(true);
+        if (containsPath(entry.path,selected)) selected=parent(entry.path);
+        if (gridPath!==null && containsPath(entry.path,gridPath)) gridPath=parent(entry.path);
+      } catch(error) {firstError??=error;}
+    }
+    await refresh();
+    const failed=entries.length-removed;
+    toast('bulkResult',{removed,failed},failed>0);
+    if (firstError) tell(firstError);
+  } finally {
+    bulkBusy=false;
+    renderTree();
+  }
+}
+
+function openSettings() {
+  const body=document.createElement('section');
+  body.className='settings-body';
+  const description=document.createElement('p');
+  description.dataset.i18n='cacheHelp';
+  const status=document.createElement('output');
+  status.setAttribute('aria-live','polite');
+  const clear=makeButton('clearCache','trash',async()=>{
+    clear.disabled=true;
+    status.textContent='';
+    try {
+      await json('/api/cache/clear',{method:'POST'});
+      status.textContent=t('cacheCleared');
+    } catch(error) {status.textContent=errorOf(error);}
+    finally {clear.disabled=false;}
+  },'button',true);
+  body.append(description,clear,status);
+  openToolPanel('settings',body);
 }
 
 function openToolPanel(title,content,onClose=()=>{}) {
@@ -1587,7 +1751,7 @@ themeButton.onclick=()=>{
 $('language').onclick=()=>{
   setLanguage(language==='zh'?'en':'zh');
   for (const [index,span] of [...$('language').querySelectorAll('span')].entries()) span.classList.toggle('active',index===(language==='zh'?0:1));
-  if (signedIn) {renderTree();renderHeader();activePreview?.language();}
+  if (signedIn) {renderTree();renderHeader();activePreview?.language();liveStatus.render();}
   $('login-error').textContent=loginError?t(loginError):'';
   modal?.();
   if (popup) {renderMenu();menu.firstElementChild?.focus();}
@@ -1641,6 +1805,22 @@ explorer.ondrop=(e)=>{
   uploadEntries(path,state=>items.length?droppedEntries(items,state):pickedEntries([...e.dataTransfer.files],false));
 };
 $('refresh').onclick=()=>refresh(true);
+$('settings').innerHTML=icon('settings');
+$('settings').onclick=openSettings;
+$('open-grid').innerHTML=icon('grid');
+updateGridButton();
+$('open-grid').onclick=()=>{
+  if (gridPath===null) {openGrid();return;}
+  gridPath=null;
+  updateGridButton();
+  setEmpty('emptyTitle','emptyHint');
+};
+$('select-many').onclick=()=>{
+  selecting=!selecting;
+  if (!selecting) marked.clear();
+  renderTree();
+};
+$('bulk-delete').onclick=deleteMarked;
 $('more').onclick=()=>{if (current) itemMenu(current,$('more'));};
 search.oninput=()=>renderTree();
 document.addEventListener('pointerdown',(e)=>{if (popup && !menu.contains(e.target) && !popup.anchor.contains(e.target)) closeMenu(false);});
@@ -1666,7 +1846,7 @@ fullLabel.hidden=true;
 document.body.append(fullLabel);
 document.addEventListener('focusin',(e)=>{
   const el=e.target;
-  const clipped=el.classList.contains('tree-main')?el.querySelector('.label'):el;
+  const clipped=el.matches('.tree-main,.tile-open')?el.querySelector('.label,.truncate'):el;
   if (!el.matches(':focus-visible') || !el.title || !clipped || clipped.scrollWidth<=clipped.clientWidth) return;
   fullLabel.textContent=el.title;
   fullLabel.hidden=false;

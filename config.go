@@ -50,10 +50,13 @@ func configPath(value, base string) (string, error) {
 		account, subpath, _ := strings.Cut(value[1:], "/")
 		var home string
 		if account == "" {
-			var err error
-			home, err = os.UserHomeDir()
-			if err != nil {
-				return "", err
+			home = os.Getenv("HOME")
+			if home == "" {
+				record, err := user.LookupId(strconv.Itoa(os.Geteuid()))
+				if err != nil {
+					return "", fmt.Errorf("look up home directory for effective user: %w", err)
+				}
+				home = record.HomeDir
 			}
 		} else {
 			record, err := user.Lookup(account)

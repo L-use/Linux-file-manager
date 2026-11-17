@@ -192,6 +192,11 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		return respond(w, value)
 	})
 	derivatives := newThumbnails()
+	register("POST /api/cache/clear", true, func(w http.ResponseWriter, r *http.Request) error {
+		derivatives.clear()
+		videos.close()
+		return respond(w, map[string]bool{"ok": true})
+	})
 	register("GET /api/thumbnail", true, func(w http.ResponseWriter, r *http.Request) error {
 		return derivatives.serve(s, w, r)
 	})

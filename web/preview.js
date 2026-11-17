@@ -240,7 +240,30 @@ function media(ctx,isVideo,fallback) {
     seek.min=volume.min='0';seek.step='any';volume.step='.02';volume.max='1';seek.max='0';seek.value='0';volume.value='1';
     seek.dataset.label='progress';volume.dataset.label='volume';
     seek.disabled=true;
-    controls.append(play,seek,clock,mute,volume);
+    const seekTrack=node('div','seek-track'), timeline=node('div','seek-timeline');
+    const buffered=node('div','seek-buffered'), played=node('div','seek-played');
+    timeline.setAttribute('aria-hidden','true');
+    timeline.append(buffered,played);
+    seekTrack.append(timeline,seek);
+    controls.append(play,seekTrack,clock,mute,volume);
+    let previousRanges='';
+    function paintBuffer(duration) {
+      const ranges=[];
+      if (Number.isFinite(duration) && duration>0) {
+        for (let i=0;i<object.buffered.length;i++) {
+          ranges.push([100*object.buffered.start(i)/duration,100*object.buffered.end(i)/duration]);
+        }
+      }
+      const key=JSON.stringify(ranges);
+      if (key===previousRanges) return;
+      previousRanges=key;
+      buffered.replaceChildren(...ranges.map(([start,end])=>{
+        const segment=node('span');
+        segment.style.left=start+'%';
+        segment.style.width=(end-start)+'%';
+        return segment;
+      }));
+    }
     function status() {
       const duration=object.duration;
       if (Number.isFinite(duration)) {
@@ -250,6 +273,8 @@ function media(ctx,isVideo,fallback) {
         const position=String(object.currentTime);
         if (seek.value!==position) seek.value=position;
       }
+      played.style.width=Number.isFinite(duration)&&duration>0?100*object.currentTime/duration+'%':'0%';
+      paintBuffer(duration);
       const label=time(object.currentTime)+' / '+time(duration);
       if (clock.value!==label) clock.value=label;
     }
@@ -269,10 +294,10 @@ function media(ctx,isVideo,fallback) {
     object.onseeked=()=>{
       if (object.readyState>=2) frameReady();
     };
-    object.ontimeupdate=object.ondurationchange=status;
+    object.ontimeupdate=object.ondurationchange=object.onprogress=object.onemptied=status;
     object.onplay=object.onpause=updateLabels;
     object.onvolumechange=()=>{volume.value=String(object.muted?0:object.volume);updateLabels();};
-    seek.oninput=()=>{object.currentTime=Number(seek.value);};
+    seek.oninput=()=>{object.currentTime=Number(seek.value);status();};
     volume.oninput=()=>{object.volume=Number(volume.value);object.muted=false;};
     status();
     updateLabels();

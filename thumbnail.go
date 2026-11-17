@@ -39,6 +39,13 @@ func newThumbnails() *thumbnails {
 	return &thumbnails{results: make(map[thumbnailKey]thumbnail), decoding: make(chan struct{}, 1)}
 }
 
+func (t *thumbnails) clear() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	clear(t.results)
+	t.order = nil
+}
+
 func (t *thumbnails) get(key thumbnailKey) thumbnail {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -49,7 +56,7 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 	q := r.URL.Query()
 	name := q.Get("path")
 	edge, err := strconv.Atoi(q.Get("edge"))
-	if err != nil || (edge != 800 && edge != 1280 && edge != 1600) {
+	if err != nil || (edge != 240 && edge != 800 && edge != 1280 && edge != 1600) {
 		return failure(400, "badRequest")
 	}
 	f, info, err := s.regular(name)
@@ -67,8 +74,18 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 		select {
 		case t.decoding <- struct{}{}:
 			defer func() { <-t.decoding }()
+		case <-r.Context().Done():
+			return r.Context().Err()
 		default:
-			return failure(503, "busy")
+			if edge != 240 {
+				return failure(503, "busy")
+			}
+			select {
+			case t.decoding <- struct{}{}:
+				defer func() { <-t.decoding }()
+			case <-r.Context().Done():
+				return r.Context().Err()
+			}
 		}
 		result = t.get(key)
 		if result.data == nil {

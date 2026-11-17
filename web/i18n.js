@@ -1,4 +1,11 @@
 const strings = {
+ settings:['设置','Settings'], largeIcons:['大图标','Large icons'], parentFolder:['返回上一级','Parent folder'],
+ selectMany:['多选','Select multiple'], selectItem:['选择「{name}」','Select “{name}”'], selectedItems:['已选 {count} 项','{count} selected'],
+ deleteManyQuestion:['将 {count} 项移入回收站？','Move {count} items to the recycle bin?'],
+ bulkResult:['已移入回收站 {removed} 项，失败 {failed} 项。','Moved {removed} items to the recycle bin. {failed} failed.'],
+ clearCache:['清除预览缓存','Clear preview cache'], cacheHelp:['清除服务器生成的缩略图和视频转码缓存。下次预览时按需重新生成。正在播放的转码视频可能需要重新打开。','Clear server-generated thumbnails and converted videos. They are regenerated as needed. Converted videos that are playing may need to be reopened.'],
+ cacheCleared:['预览缓存已清除。','Preview cache cleared.'], serverNetwork:['网络','Network'], serverOffline:['离线','Offline'],
+
  dayMode:['白昼','Day'], nightMode:['黑夜','Night'], nightTheme:['黑夜模式','Night mode'],
  title:['服务器文件管理器','Server File Manager'], explorer:['资源管理器','Explorer'], preview:['文件预览','File preview'],
  upload:['上传文件','Upload files'], uploadFolder:['上传文件夹','Upload folder'], newFolder:['新建文件夹','New folder'], refresh:['刷新目录','Refresh tree'],

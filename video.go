@@ -39,6 +39,8 @@ func (v *videoPreviews) close() {
 	for _, file := range v.files {
 		file.Close()
 	}
+	clear(v.files)
+	v.order = nil
 }
 
 func (v *videoPreviews) cached(key videoKey) bool {

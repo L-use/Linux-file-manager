@@ -16,7 +16,7 @@ function uptimeLabel(seconds) {
 export function createServerStatus(read,size) {
   const summary=byId('server-summary'), overlay=byId('server-overlay');
   byId('server-status-icon').innerHTML=icon('server');
-  let controller, snapshot, servicesKey;
+  let controller, snapshot, servicesKey, latency;
   const updateText=(node,value)=>{
     if (node.textContent!==value) node.textContent=value;
   };
@@ -25,7 +25,7 @@ export function createServerStatus(read,size) {
     const heading=byId('services-title'), list=byId('services-body');
     heading.dataset.i18n=services?.kind==='processes'?'serverProcesses':'serverServices';
     updateText(heading,t(heading.dataset.i18n));
-    const visible=services?.items.slice(0,8) || [];
+    const visible=services?.items.slice(0,12) || [];
     updateText(byId('services-count'),services?t('serverServicesCount',{shown:visible.length,total:services.total}):'');
     const rows=visible.map(item=>[item.name,size(item.memory),uptimeLabel(item.uptime)]);
     const table=rows.length?[[t('name'),t('serverRSS'),t('serverUptime')],...rows]:null;
@@ -61,6 +61,10 @@ export function createServerStatus(read,size) {
         updateText(byId(key+'-amount'),usage?size(usage.used)+' / '+size(usage.total):t('serverUnavailable'));
       }
     }
+    const network=t('serverNetwork')+' '+(latency==null?t('serverOffline'):Math.round(latency)+' ms');
+    updateText(byId('live-network'),network);
+    updateText(byId('overlay-network'),network);
+    byId('live-network').classList.toggle('network-offline',latency==null);
     const uptime=uptimeLabel(snapshot?.uptime);
     updateText(byId('live-uptime'),t('serverUptime')+' '+uptime);
     if (overlay.hidden) return;
@@ -87,6 +91,7 @@ export function createServerStatus(read,size) {
     controller?.abort();
     controller=null;
     snapshot=null;
+    latency=null;
     show(false);
   }
   function start() {
@@ -103,9 +108,11 @@ export function createServerStatus(read,size) {
           const next=await read('/api/server-status'+(expanded?'?services=1':''),{signal});
           if (signal.aborted) return;
           snapshot=next;
+          latency=performance.now()-began;
         } catch(error) {
           if (signal.aborted) return;
           snapshot=null;
+          latency=null;
           render();
           if (error?.error==='unauthenticated') return;
         }
@@ -115,5 +122,5 @@ export function createServerStatus(read,size) {
     }
     poll();
   }
-  return {start,stop};
+  return {start,stop,render};
 }
