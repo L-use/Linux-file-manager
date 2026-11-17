@@ -2,7 +2,10 @@ import {icon} from './icons.js';
 import {t,translate} from './i18n.js';
 
 const heif = new Set(['heic','heics','heif','hif']);
-const image = new Set(['jpg','jpeg','png','webp','gif','avif','bmp',...heif]);
+const raster = new Set(['tif','tiff','dng']);
+const audioFormats = new Set(['mp3','m4a','m4b','aac','wav','flac','ogg','oga','opus']);
+const archives = new Set(['zip','tar','tgz','7z','rar']);
+const image = new Set(['svg',...raster,'jpg','jpeg','png','webp','gif','avif','bmp',...heif]);
 const video = new Set(['mp4','m4v','webm','mov','mkv','ogv','avi','divx','wmv','asf','mpeg','mpg','mpe','vob','mts','m2ts','flv','f4v','3gp','3g2','rm','rmvb']);
 const codes = {
   js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',jsx:'javascript',tsx:'typescript',py:'python',go:'go',rs:'rust',java:'java',kt:'kotlin',
@@ -17,6 +20,9 @@ export function fileType(entry) {
   const lower=entry.name.toLowerCase();
   const ext=lower.includes('.')?lower.split('.').at(-1):lower;
   if (image.has(ext)) return {style:'image',icon:'image',ext};
+  if (audioFormats.has(ext)) return {style:'audio',icon:'audio',ext};
+  if (archives.has(ext) || lower.endsWith('.tar.gz')) return {style:'archive',icon:'archive',ext};
+  if (ext==='pptx') return {style:'slides',icon:'slides',ext};
   if (video.has(ext) || entry.media==='video/mp2t') return {style:'video',icon:'video',ext};
   if (ext==='pdf') return {style:'pdf',icon:'text',ext};
   if (ext==='docx') return {style:'doc',icon:'text',ext};
@@ -54,6 +60,9 @@ function waitLive(ctx) {ctx.signal.throwIfAborted();}
 export function mountPreview(ctx) {
   switch(ctx.type.style) {
     case 'image': return media(ctx,false,heif.has(ctx.type.ext)?blob=>heifImage(ctx,blob):null);
+    case 'audio': return audioPreview(ctx);
+    case 'archive': return archiveView(ctx);
+    case 'slides': return presentationView(ctx);
     case 'video': return media(ctx,true,()=>ctx.convertVideo().then(url=>({url})));
     case 'text': case 'code': return source(ctx);
     case 'pdf': return pdf(ctx);
@@ -142,6 +151,7 @@ function media(ctx,isVideo,fallback) {
   if (actual) actual.textContent='100%';
   tools.append(ctx.button('zoomOut','minus',()=>step(1/1.25)),output,ctx.button('zoomIn','plus',()=>step(1.25)),fit);
   if (actual) tools.append(actual);
+  if (ctx.type.ext==='svg') tools.append(ctx.button('source','code',()=>ctx.showAs('source'),'button',true));
   view.append(tools,stage);
   stage.append(object);
   output.textContent='—';
@@ -449,7 +459,7 @@ function media(ctx,isVideo,fallback) {
   ctx.host.replaceChildren(view);
   zoomMode('fit');
   if (useThumbnail) loadThumbnail();
-  else if (isVideo) object.src=ctx.url;
+  else if (isVideo || ctx.type.ext==='svg') object.src=ctx.url;
   else loadOriginal(object);
   return {destroy,prepareFullscreen:requestOriginal,language(){
     translate(view);
@@ -475,7 +485,12 @@ async function sanitizer(html) {
   return fragment;
 }
 async function source(ctx) {
-  const data=await ctx.getText();
+  let data;
+  try {data=await ctx.getText();}
+  catch(error) {
+    if (error?.error==='encoding') return encodingFailure(ctx);
+    throw error;
+  }
   waitLive(ctx);
   const tools=toolbar(), scroll=node('div','preview-scroll code-scroll'), lines=node('ol','code-lines');
   const normalized=data.text.replace(/\r\n?/g,'\n');
@@ -503,7 +518,8 @@ async function source(ctx) {
     toggleMarkdown.querySelector('span').dataset.i18n=label;
     translate(tools);
   },'button',true);
-  tools.append(toggleWrap);
+  tools.append(toggleWrap,encodingSelect(ctx,data.encoding));
+  if (extension==='svg') tools.append(ctx.button('preview','image',()=>ctx.showAs('image'),'button',true));
   if (isMarkdown) tools.append(toggleMarkdown);
   let highlighting;
   if (Object.hasOwn(codes,extension) && data.text.length<300000) {
@@ -571,7 +587,7 @@ async function source(ctx) {
   },'button',true);
   tools.append(editButton,saveButton,cancelButton);
   function syncEditor() {
-    editButton.hidden=editing || data.truncated;
+    editButton.hidden=editing || data.truncated || data.encoding!=='UTF-8';
     toggleMarkdown.hidden=editing || !isMarkdown;
     toggleWrap.hidden=!editing && rendered;
     saveButton.hidden=cancelButton.hidden=!editing;
@@ -837,9 +853,16 @@ async function spreadsheet(ctx) {
   waitLive(ctx);
   const XLSX=window.XLSX;
   let data=buffer;
+  let csvEncoding;
   if (ctx.type.ext==='csv') {
-    try {data=new TextDecoder('utf-8',{fatal:true}).decode(buffer);}
-    catch {throw {error:'encoding'};}
+    let decoded;
+    try {decoded=decodeCSV(buffer,ctx.encoding);}
+    catch(error) {
+      if (error?.error==='encoding') return encodingFailure(ctx);
+      throw error;
+    }
+    data=decoded.text;
+    csvEncoding=decoded.encoding;
   }
   const canEdit=ctx.type.ext==='xlsx';
   const book=XLSX.read(data,{type:typeof data==='string'?'string':'array',raw:!canEdit,cellText:true,sheetStubs:canEdit,sheetRows:20001});
@@ -857,6 +880,7 @@ async function spreadsheet(ctx) {
   previous.firstChild.style.transform='rotate(180deg)';
   const next=ctx.button('next','chevron',()=>{block++;draw();});
   tools.append(previous,rangeLabel,next);
+  if (csvEncoding) tools.append(encodingSelect(ctx,csvEncoding));
   const editButton=ctx.button('editCode','edit',()=>{editing=true;syncEdits();draw();},'button',true);
   const saveButton=ctx.button('save','check',save,'primary',true);
   const cancelButton=ctx.button('cancel','close',()=>{
@@ -1021,15 +1045,18 @@ async function spreadsheet(ctx) {
   return {language:labels,dirty,save,saving:()=>saving,destroy(){window.removeEventListener('beforeunload',beforeUnload);}};
 }
 
-async function pdf(ctx) {
+async function pdfTask(url,signal,small=false) {
   const pdfjs=await import('/vendor/pdfjs-dist/build/pdf.mjs');
-  waitLive(ctx);
-  pdfjs.GlobalWorkerOptions.workerSrc='/vendor/pdfjs-dist/build/pdf.worker.mjs';
+  signal.throwIfAborted();
   const base='/vendor/pdfjs-dist/';
-  const task=pdfjs.getDocument({
-    url:ctx.url,cMapUrl:base+'cmaps/',cMapPacked:true,standardFontDataUrl:base+'standard_fonts/',
-    isEvalSupported:false,enableXfa:false
+  pdfjs.GlobalWorkerOptions.workerSrc=base+'build/pdf.worker.mjs';
+  return pdfjs.getDocument({
+    url,cMapUrl:base+'cmaps/',cMapPacked:true,standardFontDataUrl:base+'standard_fonts/',
+    isEvalSupported:false,enableXfa:false,disableAutoFetch:small,disableStream:small
   });
+}
+async function pdf(ctx) {
+  const task=await pdfTask(ctx.url,ctx.signal);
   let stopped=false;
   function stopTask() {
     if (!stopped) {stopped=true;task.destroy().catch(()=>{});}
@@ -1158,4 +1185,412 @@ async function pdf(ctx) {
     ctx.signal.addEventListener('abort',cleanup,{once:true});
     return {destroy:cleanup,language:label};
   } catch(e) {stopTask();throw e;}
+}
+
+function encodingSelect(ctx, detected) {
+  const select=node('select','encoding-select');
+  select.dataset.label='textEncoding';
+  const options=[['auto',t('encodingAuto',{encoding:detected})],['utf-8','UTF-8'],['utf-16le','UTF-16 LE'],['utf-16be','UTF-16 BE'],['gb18030','GB18030']];
+  for (const [value,label] of options) {
+    const option=node('option');
+    option.value=value;option.textContent=label;
+    select.append(option);
+  }
+  select.value=ctx.encoding||'auto';
+  select.onchange=()=>ctx.setEncoding(select.value);
+  return select;
+}
+
+function encodingFailure(ctx) {
+  waitLive(ctx);
+  const tools=toolbar();
+  tools.append(encodingSelect(ctx,'—'));
+  ctx.host.replaceChildren(tools,badge('encoding'));
+}
+function decodeCSV(buffer,preferred) {
+  const bytes=new Uint8Array(buffer);
+  const candidates=preferred && preferred!=='auto'?[preferred]:
+    bytes[0]===255 && bytes[1]===254?['utf-16le']:bytes[0]===254 && bytes[1]===255?['utf-16be']:['utf-8','gb18030'];
+  for (const encoding of candidates) {
+    try {
+      const text=new TextDecoder(encoding,{fatal:true}).decode(buffer);
+      if (!text.includes('\u0000')) return {text,encoding:encoding.toUpperCase()};
+    } catch {}
+  }
+  throw {error:'encoding'};
+}
+
+function audioPreview(ctx) {
+  const view=node('div','audio-preview'), card=node('div','audio-card'), symbol=node('div','audio-symbol');
+  symbol.innerHTML=icon('audio');
+  const name=node('strong');
+  name.textContent=ctx.entry.name;
+  const player=node('audio');
+  player.controls=true;
+  player.preload='auto';
+  const speed=node('select','encoding-select');
+  speed.dataset.label='playbackSpeed';
+  for (const rate of [.5,.75,1,1.25,1.5,2]) {
+    const option=node('option');
+    option.value=String(rate);option.textContent=rate+'×';
+    speed.append(option);
+  }
+  speed.value='1';
+  speed.onchange=()=>{player.playbackRate=Number(speed.value);};
+  const feedback=node('p','notice');
+  feedback.hidden=true;
+  let retried=false;
+  player.onerror=async()=>{
+    if (ctx.signal.aborted) return;
+    if (retried) {ctx.report('mediaError');return;}
+    retried=true;
+    feedback.hidden=false;
+    feedback.textContent=t('convertingAudio');
+    try {
+      player.src=await ctx.convertVideo();
+      waitLive(ctx);
+      feedback.hidden=true;
+    } catch(error) {if (!ctx.signal.aborted) ctx.report(error?.error||'mediaError');}
+  };
+  card.append(symbol,name,player,speed,feedback);
+  view.append(card);
+  ctx.host.replaceChildren(view);
+  player.src=ctx.url;
+  return {destroy(){player.onerror=null;player.pause();player.removeAttribute('src');player.load();}};
+}
+
+async function archiveView(ctx) {
+  const archive=await ctx.archive();
+  waitLive(ctx);
+  const scroll=node('section','preview-scroll archive-scroll'), list=node('table','archive-table');
+  const heading=node('thead'), row=node('tr');
+  for (const key of ['name','archiveEntrySize','download']) {
+    const cell=node('th');
+    cell.dataset.i18n=key;
+    row.append(cell);
+  }
+  heading.append(row);
+  list.append(heading);
+  const body=node('tbody');
+  for (const member of archive.entries) {
+    const row=node('tr');
+    const label=node('td'), size=node('td'), operation=node('td');
+    const name=node('span');
+    name.textContent=name.title=member.name;
+    label.innerHTML=icon(member.dir?'folder':'file');
+    label.append(name);
+    size.textContent=member.dir||member.size<0?'—':ctx.size(member.size);
+    if (Number.isInteger(member.download)) {
+      const link=node('a','icon-button');
+      link.href=ctx.archiveMember(member.download);
+      link.download='';
+      link.dataset.label='download';
+      link.innerHTML=icon('download');
+      operation.append(link);
+    }
+    row.append(label,size,operation);
+    body.append(row);
+  }
+  list.append(body);
+  if (archive.limited) scroll.append(badge('archivePreviewPartial'));
+  if (archive.entries.length) scroll.append(list);
+  else scroll.append(badge('archiveEmpty'));
+  ctx.host.replaceChildren(scroll);
+}
+
+function slidePage(data,imageURL) {
+  const page=node('div','slide-page');
+  page.style.aspectRatio=clamp(data.ratio,.4,4);
+  for (const item of data.items) {
+    const itemBox=node('div','slide-item');
+    Object.assign(itemBox.style,{left:100*clamp(item.x,-1,2)+'%',top:100*clamp(item.y,-1,2)+'%',
+      width:100*clamp(item.width,0,2)+'%',height:100*clamp(item.height,0,2)+'%'});
+    if (item.image) {
+      const image=node('img');
+      image.alt='';image.src=imageURL(item.image);image.draggable=false;
+      itemBox.append(image);
+    }
+    for (const value of item.text||[]) {
+      const paragraph=node('p');
+      paragraph.textContent=value;
+      itemBox.append(paragraph);
+    }
+    page.append(itemBox);
+  }
+  return page;
+}
+
+async function presentationView(ctx) {
+  let slide=await ctx.slide(1);
+  waitLive(ctx);
+  const tools=toolbar(), stage=node('div','preview-scroll slide-scroll');
+  const position=node('input','slide-position'), count=node('output');
+  const previous=ctx.button('previous','chevron',()=>show(slide.page-1));
+  previous.firstChild.style.transform='rotate(180deg)';
+  const next=ctx.button('next','chevron',()=>show(slide.page+1));
+  position.type='number';position.min='1';position.dataset.label='page';
+  position.onchange=()=>show(Number(position.value));
+  const detail=badge('presentationLayout'), thumbnails=node('nav','slide-thumbnails');
+  thumbnails.dataset.label='slideNavigation';
+  const previews=new Map([[slide.page,Promise.resolve(slide)]]);
+  tools.append(previous,position,count,next);
+  ctx.host.replaceChildren(tools,stage,thumbnails,detail);
+  let pending;
+  function render() {
+    position.value=String(slide.page);position.max=String(slide.count);
+    previous.disabled=slide.page<=1;next.disabled=slide.page>=slide.count;
+    count.textContent='/ '+slide.count;
+    stage.replaceChildren(slidePage(slide,ctx.slideImage));
+    const start=Math.max(1,Math.min(slide.page-2,slide.count-4));
+    thumbnails.replaceChildren();
+    for (let number=start;number<=Math.min(slide.count,start+4);number++) {
+      const button=node('button','slide-thumb');
+      button.type='button';
+      button.setAttribute('aria-label',t('slideNumber',{number}));
+      if (number===slide.page) button.setAttribute('aria-current','page');
+      const preview=node('span','slide-thumb-preview'), label=node('span');
+      label.textContent=String(number);
+      button.append(preview,label);
+      button.onclick=()=>show(number);
+      thumbnails.append(button);
+      if (!previews.has(number)) {
+        const loading=ctx.slide(number).catch(error=>{previews.delete(number);throw error;});
+        previews.set(number,loading);
+        if (previews.size>24) previews.delete(previews.keys().next().value);
+      }
+      previews.get(number).then(page=>{
+        if (button.isConnected && !ctx.signal.aborted) preview.append(slidePage(page,ctx.slideImage));
+      }).catch(()=>{});
+    }
+  }
+  async function show(page) {
+    if (!Number.isInteger(page) || page<1 || page>slide.count) {render();return;}
+    pending?.abort();
+    pending=new AbortController();
+    const {signal}=pending;
+    try {const selected=await (previews.get(page) || ctx.slide(page,signal));if (!signal.aborted) {slide=selected;render();}}
+    catch(error) {if (!signal.aborted) ctx.notify(error);}
+  }
+  render();
+  ctx.signal.addEventListener('abort',()=>pending?.abort(),{once:true});
+  return {destroy(){pending?.abort();}};
+}
+
+function mediaEvent(media,event,signal,timeout=6000) {
+  return new Promise((resolve,reject)=>{
+    function cleanup() {
+      clearTimeout(timer);
+      media.removeEventListener(event,ready);
+      media.removeEventListener('error',fail);
+      signal.removeEventListener('abort',fail);
+    }
+    function ready(){cleanup();resolve();}
+    function fail(){cleanup();reject(new Error('Media unavailable'));}
+    const timer=setTimeout(fail,timeout);
+    media.addEventListener(event,ready,{once:true});
+    media.addEventListener('error',fail,{once:true});
+    signal.addEventListener('abort',fail,{once:true});
+    if (signal.aborted) fail();
+  });
+}
+
+function tileImage(url) {
+  const image=node('img','grid-preview-content');
+  image.loading='lazy';image.decoding='async';image.alt='';image.draggable=false;
+  image.onerror=()=>image.remove();
+  image.src=url;
+  return image;
+}
+
+function tileLines(lines,style='') {
+  const paper=node('div','grid-preview-content tile-paper '+style);
+  for (const line of lines.slice(0,6)) {
+    const row=node('div');
+    row.textContent=String(line || ' ').slice(0,100);
+    paper.append(row);
+  }
+  return lines.some(Boolean)?paper:null;
+}
+
+async function videoTile(ctx) {
+  const video=node('video');
+  video.preload='auto';video.muted=true;video.playsInline=true;
+  try {
+    const loaded=mediaEvent(video,'loadeddata',ctx.signal);
+    video.src=ctx.url;
+    await loaded;
+    if (Number.isFinite(video.duration) && video.duration>1) {
+      const seek=mediaEvent(video,'seeked',ctx.signal,2500);
+      video.currentTime=Math.min(1,video.duration*.1);
+      await seek;
+    }
+    if (!video.videoWidth || !video.videoHeight) throw new Error('Empty frame');
+    const canvas=node('canvas','grid-preview-content');
+    const scale=240/Math.max(video.videoWidth,video.videoHeight);
+    canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
+    canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    return canvas;
+  } catch(error) {
+    if (ctx.signal.aborted) return null;
+    const poster=tileImage(ctx.api('video-poster'));
+    poster.loading='eager';
+    const loaded=mediaEvent(poster,'load',ctx.signal,16000);
+    if (!poster.complete || !poster.naturalWidth) await loaded;
+    else loaded.catch(()=>{});
+    return poster;
+  } finally {
+    video.removeAttribute('src');video.load();
+  }
+}
+
+async function audioTile(ctx) {
+  try {
+    const audio=node('audio');
+    audio.preload='metadata';
+    const loaded=mediaEvent(audio,'loadedmetadata',ctx.signal);
+    audio.src=ctx.url;
+    let duration;
+    try {await loaded;duration=audio.duration;}
+    finally {audio.removeAttribute('src');audio.load();}
+    if (ctx.entry.size<=2*1024*1024 && typeof OfflineAudioContext!=='undefined' && duration>0 && duration<=180) {
+      const bytes=await (await ctx.read()).arrayBuffer();
+      const decoded=await new OfflineAudioContext(1,1,44100).decodeAudioData(bytes);
+      const samples=decoded.getChannelData(0), canvas=node('canvas','grid-preview-content audio-waveform');
+      canvas.width=240;canvas.height=110;
+      const paint=canvas.getContext('2d');
+      paint.fillStyle='#458ade';
+      for (let i=0;i<60;i++) {
+        const start=Math.floor(samples.length*i/60), end=Math.floor(samples.length*(i+1)/60);
+        let peak=0;
+        for (let j=start;j<end;j+=Math.max(1,Math.floor((end-start)/100))) peak=Math.max(peak,Math.abs(samples[j]));
+        const height=Math.max(4,100*peak);
+        paint.fillRect(i*4,(110-height)/2,3,height);
+      }
+      return canvas;
+    }
+    if (Number.isFinite(duration) && duration>0) return tileLines([ctx.type.ext.toUpperCase(),Math.floor(duration/60)+':'+String(Math.floor(duration%60)).padStart(2,'0')],'tile-audio');
+  } catch {}
+  return tileLines([ctx.type.ext.toUpperCase(),new Intl.NumberFormat(undefined,{unit:'kilobyte',style:'unit',maximumFractionDigits:0}).format(ctx.entry.size/1024)],'tile-audio');
+}
+
+async function gridThumbnail(ctx) {
+  const {ext,style}=ctx.type;
+  switch(style) {
+    case 'image':
+      if (raster.has(ext)) return tileImage(ctx.api('raster',{thumbnail:'1'}));
+      if (heif.has(ext)) {
+        const result=await heifImage(ctx);
+        result.canvas.className='grid-preview-content';
+        return result.canvas;
+      }
+      if (ctx.entry.size>=1024*1024 && ['jpg','jpeg','png'].includes(ext)) {
+        const image=tileImage(ctx.api('thumbnail',{edge:240}));
+        image.onerror=()=>{
+          image.onerror=()=>image.remove();
+          if (ctx.entry.size<=12*1024*1024) image.src=ctx.url;
+          else image.remove();
+        };
+        return image;
+      }
+      return tileImage(ctx.url);
+    case 'video': return videoTile(ctx);
+    case 'audio': return audioTile(ctx);
+    case 'text': case 'code': {
+      try {
+        const text=await ctx.json('text',{thumbnail:1});
+        return tileLines(text.text.split(/\r?\n/),'tile-code');
+      } catch(error) {
+        if (ext==='ts' && !ctx.signal.aborted) return videoTile(ctx);
+        throw error;
+      }
+    }
+    case 'archive': {
+      const archive=await ctx.json('archive',{thumbnail:1});
+      return tileLines(archive.entries.map(item=>(item.dir?'▸ ':'')+item.name));
+    }
+    case 'doc': {
+      if (ctx.entry.size>12<<20) return null;
+      const doc=await ctx.json('word',{thumbnail:1});
+      return tileLines(doc.paragraphs);
+    }
+    case 'sheet': {
+      if (ctx.entry.size>12<<20) return null;
+      const bytes=await arrayBuffer(ctx,12<<20);
+      await script('/vendor/xlsx/xlsx.full.min.js');
+      const data=ext==='csv'?decodeCSV(bytes).text:bytes;
+      if (ext==='xlsx') verifyOfficeZip(bytes);
+      const XLSX=window.XLSX;
+      const book=XLSX.read(data,{type:typeof data==='string'?'string':'array',sheetRows:6,sheets:0});
+      const sheet=book.Sheets[book.SheetNames[0]];
+      if (!sheet) return null;
+      const table=node('table','grid-preview-content tile-table');
+      for (const row of XLSX.utils.sheet_to_json(sheet,{header:1,raw:false}).slice(0,5)) {
+        const tr=node('tr');
+        for (const value of row.slice(0,4)) {
+          const cell=node('td');cell.textContent=value;
+          tr.append(cell);
+        }
+        table.append(tr);
+      }
+      return table.rows.length?table:null;
+    }
+    case 'pdf': {
+      const task=await pdfTask(ctx.url,ctx.signal,true);
+      const cancel=()=>task.destroy().catch(()=>{});
+      ctx.signal.addEventListener('abort',cancel,{once:true});
+      try {
+        const pdf=await task.promise, page=await pdf.getPage(1);
+        const size=page.getViewport({scale:1});
+        const viewport=page.getViewport({scale:200/Math.max(size.height,size.width)});
+        const canvas=node('canvas','grid-preview-content');
+        canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+        await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+        return canvas;
+      } finally {
+        ctx.signal.removeEventListener('abort',cancel);
+        await cancel();
+      }
+    }
+    case 'slides': {
+      const data=await ctx.json('presentation',{page:1});
+      const slide=slidePage(data,part=>ctx.api('presentation-image',{part}));
+      slide.classList.add('grid-preview-content');
+      return slide;
+    }
+    default: return null;
+  }
+}
+
+export function mountGridThumbnails(grid,items,signal,route,fileURL) {
+  const queue=[], pending=new Map(items.map(item=>[item.element,item]));
+  let running=0;
+  const observer=new IntersectionObserver(records=>{
+    for (const record of records) {
+      if (!record.isIntersecting) continue;
+      observer.unobserve(record.target);
+      queue.push(pending.get(record.target));
+      pending.delete(record.target);
+    }
+    pump();
+  },{root:grid,rootMargin:'100px'});
+  signal.addEventListener('abort',()=>{observer.disconnect();queue.length=0;pending.clear();},{once:true});
+  for (const item of items) observer.observe(item.element);
+  function pump() {
+    while (!signal.aborted && running<3 && queue.length) {
+      running++;
+      render(queue.shift()).catch(()=>{}).finally(()=>{running--;pump();});
+    }
+  }
+  async function render({element,entry,type}) {
+    const api=(action,options)=>route(action,entry.path,options);
+    const url=fileURL(entry.path);
+    const response=async address=>{
+      const result=await fetch(address,{signal});
+      if (!result.ok) throw new Error('Preview unavailable');
+      return result;
+    };
+    const content=await gridThumbnail({entry,type,api,url,signal,read:()=>response(url),json:async(action,options)=>(await response(api(action,options))).json()});
+    if (content && !signal.aborted) element.append(content);
+  }
 }

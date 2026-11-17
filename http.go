@@ -304,6 +304,32 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 	register("GET /api/thumbnail", true, func(w http.ResponseWriter, r *http.Request) error {
 		return derivatives.serve(s, w, r)
 	})
+	register("GET /api/raster", true, func(w http.ResponseWriter, r *http.Request) error {
+		return derivatives.serveRaster(s, w, r, videos.executable)
+	})
+	register("GET /api/video-poster", true, func(w http.ResponseWriter, r *http.Request) error {
+		return videos.poster(s, w, r)
+	})
+	register("GET /api/archive", true, func(w http.ResponseWriter, r *http.Request) error {
+		q := r.URL.Query()
+		limit := 1000
+		if q.Get("thumbnail") == "1" {
+			limit = 4
+		}
+		result, err := s.previewArchive(r.Context(), q.Get("path"), limit)
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
+	register("GET /api/archive-member", true, func(w http.ResponseWriter, r *http.Request) error {
+		q := r.URL.Query()
+		index, err := strconv.Atoi(q.Get("index"))
+		if err != nil {
+			return failure(400, "badRequest")
+		}
+		return s.downloadArchiveMember(w, r, q.Get("path"), index, q.Get("version"))
+	})
 	register("GET /api/file", true, func(w http.ResponseWriter, r *http.Request) error {
 		f, info, err := s.regular(r.URL.Query().Get("path"))
 		if err != nil {
@@ -331,14 +357,16 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 				return err
 			}
 			defer f.Close()
-			if !strings.HasPrefix(sourceMediaType(f, name), "video/") {
+			mime := sourceMediaType(f, name)
+			audio := strings.HasPrefix(mime, "audio/")
+			if !audio && !strings.HasPrefix(mime, "video/") {
 				return failure(415, "unsupported")
 			}
 			key := videoKey{name, version(info)}
 			if r.Method != "POST" {
-				return videos.serve(w, r, key, info.ModTime())
+				return videos.serve(w, r, key, info.ModTime(), audio)
 			}
-			if err := videos.convert(r.Context(), key, f); err != nil {
+			if err := videos.convert(r.Context(), key, f, audio); err != nil {
 				return err
 			}
 			return respond(w, map[string]bool{"ok": true})
@@ -350,7 +378,7 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 			return err
 		}
 		defer f.Close()
-		preview, err := readText(f, info)
+		preview, err := readTextEncoding(f, info, r.URL.Query().Get("encoding"))
 		if err != nil {
 			return err
 		}
@@ -370,6 +398,22 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 			return err
 		}
 		return respond(w, map[string]bool{"ok": true})
+	})
+	register("GET /api/presentation", true, func(w http.ResponseWriter, r *http.Request) error {
+		q := r.URL.Query()
+		page, err := strconv.Atoi(q.Get("page"))
+		if err != nil {
+			return failure(400, "badRequest")
+		}
+		result, err := s.previewPresentation(q.Get("path"), page)
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
+	register("GET /api/presentation-image", true, func(w http.ResponseWriter, r *http.Request) error {
+		q := r.URL.Query()
+		return s.servePresentationImage(w, q.Get("path"), q.Get("part"))
 	})
 	register("GET /api/word", true, func(w http.ResponseWriter, r *http.Request) error {
 		preview, err := s.wordPreview(r.URL.Query().Get("path"))
@@ -461,6 +505,20 @@ func mediaType(ext string) string {
 		return "image/avif"
 	case ".bmp":
 		return "image/bmp"
+	case ".svg":
+		return "image/svg+xml"
+	case ".mp3":
+		return "audio/mpeg"
+	case ".m4a", ".m4b":
+		return "audio/mp4"
+	case ".aac":
+		return "audio/aac"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg", ".oga", ".opus":
+		return "audio/ogg"
 	case ".heic", ".heics":
 		return "image/heic"
 	case ".heif", ".hif":
@@ -491,4 +549,10 @@ func mediaType(ext string) string {
 		return "video/vnd.rn-realvideo"
 	}
 	return ""
+}
+
+func setDownloadHeaders(w http.ResponseWriter, name string) {
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 }

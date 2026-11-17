@@ -17,18 +17,18 @@ for arch in amd64 arm64; do
   cp README.md LICENSE THIRD_PARTY.md "$release/"
   cp config.example.json "$release/config.json"
   : > "$release/filemanager.portable"
-  for license in web/vendor/*/LICENSE* vendor/golang.org/x/*/LICENSE; do
+  for license in web/vendor/*/LICENSE* $(cat GO_LICENSES); do
     mkdir -p "$release/$(dirname "$license")"
     cp "$license" "$release/$license"
   done
   (
     cd "$stage"
     zip -q -yr "$name.zip" "$name"
-    COPYFILE_DISABLE=1 tar --format=ustar -czf "$name.tar.gz" "$name/filemanager" "$name/config.json"
+    COPYFILE_DISABLE=1 tar --format=ustar -czf "$name.tar.gz" "$name/filemanager" "$name/config.json" "$name/LICENSE" "$name/THIRD_PARTY.md" "$name/vendor" "$name/web"
   )
 done
 
-zip -q -r "$stage/file-manager-source.zip" README.md LICENSE THIRD_PARTY.md VERSION config.example.json .gitignore build.sh install.sh go.mod go.sum ./*.go vendor web -x '*/.DS_Store'
+zip -q -r "$stage/file-manager-source.zip" README.md LICENSE THIRD_PARTY.md VERSION GO_LICENSES config.example.json .gitignore build.sh install.sh go.mod go.sum ./*.go vendor web -x '*/.DS_Store'
 cp install.sh "$stage/install.sh"
 
 set -- file-manager-linux-amd64.zip file-manager-linux-arm64.zip file-manager-source.zip \

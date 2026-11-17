@@ -22,6 +22,9 @@ import (
 //go:embed web
 var assets embed.FS
 
+//go:embed GO_LICENSES
+var goLicensePaths string
+
 func main() {
 	var ready, inheritedLock *os.File
 	if os.Getenv(daemonEnv) == "1" {

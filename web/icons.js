@@ -1,4 +1,6 @@
 const paths = {
+ audio:'<path d="M9 18V5l11-2v13"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/>',
+ slides:'<rect x="3" y="4" width="18" height="13" rx="1"/><path d="M12 17v4m-4 0h8M7 8h10m-10 4h7"/>',
  grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
  settings:'<circle cx="12" cy="12" r="3"/><path d="m10 2-.6 2.5-1.8.8-2.2-1.3-2.8 2.8 1.3 2.2-.8 1.8L1 11v2l2.6.6.8 1.8-1.3 2.2 2.8 2.8 2.2-1.3 1.8.8.6 2.5h3l.6-2.5 1.8-.8 2.2 1.3 2.8-2.8-1.3-2.2.8-1.8L23 13v-2l-2.6-.6-.8-1.8 1.3-2.2-2.8-2.8-2.2 1.3-1.8-.8L13.5 2z"/>',
  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4m0-14.2-1.4 1.4M6.3 17.7l-1.4 1.4"/>',

@@ -1,6 +1,6 @@
 # Third-party components
 
-Browser dependencies are bundled with their upstream licenses in `web/vendor`. The running application serves the exact embedded copies locally. Source dependencies for Go are under `vendor/golang.org/x/`.
+Browser dependencies are bundled with their upstream licenses in `web/vendor`. The running application serves the exact embedded copies locally. Go dependencies are bundled under `vendor/`. [GO_LICENSES](GO_LICENSES) lists their license files.
 
 | Component | Version | License file |
 | --- | --- | --- |
@@ -15,6 +15,10 @@ Browser dependencies are bundled with their upstream licenses in `web/vendor`. T
 | libheif-js (with bundled WebAssembly runtime) | 1.23.5 | `web/vendor/libheif-js/LICENSE` and `web/vendor/libheif-js/LICENSE.runtime` |
 | golang.org/x/sys | 0.38.0 | `vendor/golang.org/x/sys/LICENSE` |
 | golang.org/x/term | 0.37.0 | `vendor/golang.org/x/term/LICENSE` |
+| golang.org/x/image | 0.33.0 | `vendor/golang.org/x/image/LICENSE` |
+| golang.org/x/text | 0.31.0 | `vendor/golang.org/x/text/LICENSE` |
+| bodgit/sevenzip | 1.6.1 | `vendor/github.com/bodgit/sevenzip/LICENSE` |
+| nwaples/rardecode/v2 | 2.2.0 | `vendor/github.com/nwaples/rardecode/v2/LICENSE` |
 
 The JavaScript bundles may contain additional components whose notices are included by the corresponding upstream distributions.
 

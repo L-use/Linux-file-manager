@@ -1,4 +1,16 @@
 const strings = {
+ archiveReadError:['无法读取压缩包，可能已加密或损坏。','The archive could not be read. It may be encrypted or damaged.'],
+ archivePreviewLimit:['压缩包超出预览大小限制。','The archive exceeds the preview size limit.'],
+ archivePreviewPartial:['这里只显示扫描范围内的条目。','Only entries within the scan limit are shown.'],
+ archiveEntrySize:['大小','Size'], archiveEmpty:['压缩包为空。','The archive is empty.'],
+ presentationError:['无法读取此演示文稿。','Could not read this presentation.'],
+ slideNavigation:['幻灯片缩略图','Slide thumbnails'], slideNumber:['第 {number} 页','Slide {number}'],
+ presentationLayout:['只读预览。复杂版式、动画和主题可能与原文不同。','Read-only preview. Complex layouts, animations, and themes may differ.'],
+ rasterLimit:['图片超出预览大小限制。','The image exceeds the preview size limit.'],
+ dngNoPreview:['此 DNG 没有可读取的内嵌 JPEG 预览。','This DNG has no readable embedded JPEG preview.'],
+ textEncoding:['文本编码','Text encoding'], encodingAuto:['自动 · {encoding}','Auto · {encoding}'],
+ playbackSpeed:['播放速度','Playback speed'], convertingAudio:['正在转换音频…','Converting audio…'],
+
  restartService:['重启服务','Restart service'],
  restartConfirm:['现在重启服务？重启后需要重新登录。','Restart the service now? You will need to sign in again.'],
  restartReconnect:['暂未重新连接。请刷新页面或查看服务日志。','Could not reconnect yet. Refresh the page or check the service log.'],

@@ -1,6 +1,6 @@
 import {icon} from './icons.js';
 import {language, setLanguage, t, translate} from './i18n.js';
-import {mountPreview, fileType} from './preview.js';
+import {mountPreview, fileType, mountGridThumbnails} from './preview.js';
 import {createServerStatus} from './server-status.js';
 
 const $ = (id) => document.getElementById(id);
@@ -21,7 +21,7 @@ try {
 } catch {}
 let root = '', selected = '', current = null, activePreview = null, previewId = 0, generation = 0;
 let loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
-let gridPath=null, selecting=false, bulkBusy=false;
+let gridPath=null, selecting=false, bulkBusy=false, gridPreview;
 const marked=new Map();
 
 const parent = (name) => name.includes('/') ? name.slice(0,name.lastIndexOf('/')) : '';
@@ -214,6 +214,7 @@ function setDrawer(open) {
 function showLogin(error='') {
   signedIn=false;
   gridPath=null;
+  gridPreview?.abort();
   selecting=false;
   marked.clear();
   $('settings').hidden=true;
@@ -478,6 +479,8 @@ function gridDragSelection(grid, tiles) {
 function renderGrid() {
   if (gridPath===null || current) return;
   updateGridButton();
+  gridPreview?.abort();
+  gridPreview=new AbortController();
   const host=$('preview-host');
   const prior=host.querySelector('.file-grid')?.scrollTop || 0;
   const entries=cache.get(gridPath);
@@ -492,7 +495,7 @@ function renderGrid() {
   if (gridPath) headline.prepend(makeButton('parentFolder','chevron',()=>openGrid(parent(gridPath))));
   const grid=document.createElement('div');
   grid.className='file-grid';
-  const tiles=new Map();
+  const tiles=new Map(), previews=[];
   const filter=search.value.trim().toLocaleLowerCase();
   for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && item.name.toLocaleLowerCase().includes(filter)))) {
     const tile=document.createElement('div');
@@ -505,16 +508,7 @@ function renderGrid() {
     const preview=document.createElement('span');
     preview.className='tile-preview type-'+type.style;
     preview.innerHTML=icon(type.icon);
-    if (type.style==='image' && ['jpg','jpeg','png','gif','avif','webp','bmp'].includes(type.ext)) {
-      const small=entry.size<1024*1024;
-      if (small || ['jpg','jpeg','png'].includes(type.ext)) {
-        const image=document.createElement('img');
-        image.loading='lazy';image.decoding='async';image.alt='';image.draggable=false;
-        image.src=small?fileURL(entry.path):query('thumbnail',entry.path,{edge:240});
-        image.onerror=()=>image.remove();
-        preview.append(image);
-      }
-    }
+    if (entry.kind==='file') previews.push({entry,type,element:preview});
     const name=document.createElement('span');
     name.className='truncate';
     name.textContent=entry.name;
@@ -530,6 +524,7 @@ function renderGrid() {
   else gridDragSelection(grid,tiles);
   host.replaceChildren(headline,grid);
   grid.scrollTop=prior;
+  mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL);
   translate(host);
 }
 async function openGrid(path=targetDirectory()) {
@@ -726,6 +721,7 @@ async function closePreview(discardApproved=false) {
 async function showFile(entry, options={}) {
   if (!options.discardApproved && unsaved() && !await reviewEdits()) return;
   gridPath=null;
+  gridPreview?.abort();
   updateGridButton();
   const id=++previewId;
   activePreview?.destroy();
@@ -754,7 +750,8 @@ async function showFile(entry, options={}) {
   };
 
   let latest=entry;
-  const url=fileURL(entry.path);
+  const initialType=fileType(entry);
+  const url=initialType.style==='image'&&['tiff','tif','dng'].includes(initialType.ext)?query('raster',entry.path):fileURL(entry.path);
   const alive=()=>id===previewId && !controller.signal.aborted && !failed;
   function showFailure(code) {
     if (!alive()) return;
@@ -771,8 +768,14 @@ async function showFile(entry, options={}) {
     } else if (unavailable) $('download').hidden=true;
   }
   const context={
-    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,
-    getText:()=>json(query('text',entry.path),{signal:controller.signal}),
+    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,encoding:options.encoding,
+    showAs:format=>showFile(current,{format,encoding:options.encoding}),
+    setEncoding:encoding=>showFile(current,{format:options.format,encoding}),
+    getText:()=>json(query('text',entry.path,{encoding:options.encoding||'auto'}),{signal:controller.signal}),
+    archive:()=>json(query('archive',entry.path),{signal:controller.signal}),
+    archiveMember:index=>query('archive-member',entry.path,{index,version:latest.version}),
+    slide:(page,signal=controller.signal)=>json(query('presentation',entry.path,{page}),{signal}),
+    slideImage:part=>query('presentation-image',entry.path,{part}),
     saveText:(body,version)=>json(query('text',entry.path,{version}),{
       method:'PUT',body,headers:{'Content-Type':'text/plain; charset=utf-8'},signal:controller.signal,
     }),
@@ -805,8 +808,7 @@ async function showFile(entry, options={}) {
     details(value){if (alive()) {detail=value;updateStatus(detail);}},
     size,button:makeButton,
   };
-  const initialType=fileType(entry);
-  const directMedia=entry.kind==='file' && ['image','video'].includes(initialType.style);
+  const directMedia=entry.kind==='file' && options.format!=='source' && ['image','video','audio'].includes(initialType.style);
   try {
     // Media requests can start from the directory entry while metadata is checked separately.
     if (directMedia) {
@@ -830,7 +832,8 @@ async function showFile(entry, options={}) {
     const head=await context.probeMedia();
     if (!alive()) return;
     latest.media=head.headers.get('Content-Type');
-    const type=fileType(latest);
+    const detected=fileType(latest);
+    const type=options.format==='source'&&detected.ext==='svg'?{...detected,style:'code'}:detected;
     if (latest.media==='video/mp2t') renderHeader();
     dispose=await mountPreview({...context,entry:latest,type});
     if (controller.signal.aborted) dispose?.destroy?.();
@@ -2187,6 +2190,7 @@ updateGridButton();
 $('open-grid').onclick=()=>{
   if (gridPath===null) {openGrid();return;}
   gridPath=null;
+  gridPreview?.abort();
   updateGridButton();
   setEmpty('emptyTitle','emptyHint');
 };

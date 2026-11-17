@@ -100,7 +100,7 @@ func removePortableArtifacts(appDir string) error {
 		if err != nil {
 			return err
 		}
-		licensePaths = append(licensePaths, "vendor/golang.org/x/sys/LICENSE", "vendor/golang.org/x/term/LICENSE")
+		licensePaths = append(licensePaths, strings.Fields(goLicensePaths)...)
 		store, err := openFiles(appDir, nil)
 		if err != nil {
 			return err

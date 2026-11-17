@@ -28,7 +28,7 @@ func newVideoPreviews(executable, state string) *videoPreviews {
 	return &videoPreviews{executable: executable, state: state, converting: make(chan struct{}, 1), cache: newPreviewCache(state)}
 }
 
-func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.File) error {
+func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.File, audio bool) error {
 	if v.executable == "" {
 		return failure(503, "videoToolMissing")
 	}
@@ -63,14 +63,19 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	command := exec.CommandContext(ctx, v.executable,
-		"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-max_alloc", "134217728",
-		"-protocol_whitelist", "fd", "-format_whitelist", "mov,matroska,webm,avi,asf,mpeg,mpegts,mpegvideo,flv,ogg,rm",
-		"-max_pixels", "40000000", "-threads", "2", "-fd", "3", "-i", "fd:",
-		"-map", "0:V:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1",
-		"-filter_threads", "2", "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
-		"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-threads", "2",
-		"-c:a", "aac", "-ac", "2", "-fs", strconv.FormatInt(maxSize, 10), "-fd", "4", "-f", "mp4", "fd:")
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-max_alloc", "134217728",
+		"-protocol_whitelist", "fd", "-format_whitelist", "mov,matroska,webm,avi,asf,mpeg,mpegts,mpegvideo,flv,ogg,rm,mp3,wav,flac,aac",
+		"-max_pixels", "40000000", "-threads", "2", "-fd", "3", "-i", "fd:"}
+	if audio {
+		args = append(args, "-map", "0:a:0", "-vn")
+	} else {
+		args = append(args, "-map", "0:V:0", "-map", "0:a:0?", "-filter_threads", "2",
+			"-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
+			"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-threads", "2")
+	}
+	args = append(args, "-map_metadata", "-1", "-map_chapters", "-1", "-c:a", "aac", "-ac", "2",
+		"-fs", strconv.FormatInt(maxSize, 10), "-fd", "4", "-f", "mp4", "fd:")
+	command := exec.CommandContext(ctx, v.executable, args...)
 	command.ExtraFiles = []*os.File{input, output}
 	if err := command.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -100,7 +105,7 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 	return nil
 }
 
-func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoKey, modified time.Time) error {
+func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoKey, modified time.Time, audio bool) error {
 	preview, err := v.cache.openVideo(key)
 	if err != nil {
 		return err
@@ -110,7 +115,11 @@ func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoK
 	if err != nil {
 		return err
 	}
-	w.Header().Set("Content-Type", "video/mp4")
+	mime := "video/mp4"
+	if audio {
+		mime = "audio/mp4"
+	}
+	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
 	http.ServeContent(w, r, "compatible.mp4", modified, io.NewSectionReader(preview, 0, info.Size()))
 	return nil
@@ -118,7 +127,11 @@ func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoK
 
 func videoExecutable(path string) (string, error) {
 	if path == "" {
-		return "", nil
+		executable, err := exec.LookPath("ffmpeg")
+		if err != nil {
+			return "", nil
+		}
+		return canonical(executable)
 	}
 	if strings.ContainsRune(path, filepath.Separator) {
 		var err error
@@ -149,4 +162,59 @@ func sourceMediaType(file *os.File, name string) string {
 		}
 	}
 	return ""
+}
+
+func (v *videoPreviews) poster(s *fileStore, w http.ResponseWriter, r *http.Request) error {
+	if v.executable == "" {
+		return failure(503, "videoToolMissing")
+	}
+	name := r.URL.Query().Get("path")
+	f, info, err := s.regular(name)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if !strings.HasPrefix(sourceMediaType(f, name), "video/") {
+		return failure(415, "unsupported")
+	}
+	key := thumbnailKey{name, version(info), -1}
+	if cached := v.cache.image(key); cached.data != nil {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(cached.data)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	select {
+	case v.converting <- struct{}{}:
+		defer func() { <-v.converting }()
+	case <-ctx.Done():
+		return failure(503, "videoBusy")
+	}
+	if cached := v.cache.image(key); cached.data != nil {
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(cached.data)
+		return nil
+	}
+	_, generation := v.cache.budget()
+	command := exec.CommandContext(ctx, v.executable, "-hide_banner", "-loglevel", "error", "-nostdin",
+		"-max_alloc", "67108864", "-protocol_whitelist", "fd,pipe", "-format_whitelist", "mov,matroska,webm,avi,asf,mpeg,mpegts,mpegvideo,flv,ogg,rm",
+		"-max_pixels", "40000000", "-threads", "1", "-fd", "3", "-i", "fd:", "-map", "0:V:0",
+		"-filter_threads", "1", "-vf", "scale=240:240:force_original_aspect_ratio=decrease", "-frames:v", "1", "-fs", "262144", "-f", "image2pipe", "-c:v", "mjpeg", "pipe:1")
+	command.ExtraFiles = []*os.File{f}
+	data, err := command.Output()
+	if err != nil || len(data) == 0 || len(data) > 256<<10 {
+		return failure(415, "mediaError")
+	}
+	latest, err := descriptorStat(f)
+	if err != nil {
+		return err
+	}
+	if !matches(latest, key.version) {
+		return failure(409, "changed")
+	}
+	v.cache.put(previewCacheEntry{key: key, image: thumbnail{data: data}, size: int64(len(data))}, generation)
+	w.Header().Set("Content-Type", "image/jpeg")
+	_, _ = w.Write(data)
+	return nil
 }
