@@ -1,4 +1,10 @@
 const strings = {
+ uploadCommitting:['传输完成，正在保存到服务器…','Transfer complete. Saving on the server…'],
+ locatingFolder:['正在定位目录…','Locating folder…'], creatingFolder:['正在创建目录…','Creating folder…'],
+ movingItem:['正在移动…','Moving item…'], renamingItem:['正在重命名…','Renaming item…'],
+ renderingMarkdown:['正在渲染 Markdown…','Rendering Markdown…'], loadingPDF:['正在读取 PDF…','Loading PDF…'],
+ loadingSlideImages:['正在加载幻灯片图片…','Loading slide images…'],
+
  processing:['正在处理…','Working…'], savingChanges:['正在保存…','Saving changes…'],
  refreshing:['正在刷新目录…','Refreshing folders…'], deletingFiles:['正在删除所选项目…','Deleting selected items…'],
  zipExtractingProgress:['正在解压 ZIP…','Extracting ZIP…'], zipFinishing:['正在写入解压结果…','Finishing extraction…'],

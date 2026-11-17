@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {startProgress} from './progress.js';
+import {progressPercent,startProgress} from './progress.js';
 import {t,translate} from './i18n.js';
 
 const heif = new Set(['heic','heics','heif','hif']);
@@ -250,7 +250,7 @@ function media(ctx,isVideo,fallback) {
           parts.push(value);
           if (total>0) {
             originalProgress.value=Math.min(1,loaded/total);
-            originalPercent.textContent=Math.floor(originalProgress.value*100)+'%';
+            originalPercent.textContent=progressPercent(loaded,total);
           }
         }
       }
@@ -417,8 +417,11 @@ function media(ctx,isVideo,fallback) {
     const [a,b]=[...pointers.values()];
     return {x:(a.x+b.x)/2,y:(a.y+b.y)/2,d:Math.hypot(a.x-b.x,a.y-b.y)};
   };
+  let swipeStart=null;
   stage.onpointerdown=(e)=>{
     if (e.button!==0) return;
+    swipeStart=e.pointerType==='touch' && pointers.size===0 && !stage.classList.contains('zoomed')
+      ? {id:e.pointerId,x:e.clientX,y:e.clientY}:null;
     stage.setPointerCapture(e.pointerId);
     pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
     previousPinch=pinch();
@@ -437,7 +440,16 @@ function media(ctx,isVideo,fallback) {
     }
     previousPinch=next;
   };
-  const end=(e)=>{pointers.delete(e.pointerId);previousPinch=pinch();stage.classList.remove('panning');};
+  function end(e) {
+    const start=swipeStart;
+    swipeStart=null;
+    pointers.delete(e.pointerId);
+    previousPinch=pinch();
+    stage.classList.remove('panning');
+    if (e.type!=='pointerup' || start?.id!==e.pointerId || stage.classList.contains('zoomed')) return;
+    const dx=e.clientX-start.x, dy=e.clientY-start.y;
+    if (Math.abs(dx)>=48 && Math.abs(dx)>Math.abs(dy)*1.5) ctx.navigateMedia(dx<0?1:-1);
+  }
   stage.onpointerup=stage.onpointercancel=stage.onlostpointercapture=end;
   stage.ondblclick=ctx.fullscreen;
   function destroy() {
@@ -560,11 +572,14 @@ async function source(ctx) {
   },'button',true);
   const toggleMarkdown=ctx.button('markdown','text',async()=>{
     if (!parsed) {
+      toggleMarkdown.disabled=true;
+      const progress=startProgress(ctx.host,'renderingMarkdown');
       try {
         const {marked}=await import('/vendor/marked/lib/marked.esm.js');
         parsed=await sanitizer(marked.parse(normalized));
         waitLive(ctx);
       } catch(e) {if (!ctx.signal.aborted) ctx.report('readError');return;}
+      finally {progress.finish();toggleMarkdown.disabled=false;}
     }
     rendered=!rendered;
     showSource();
@@ -1119,8 +1134,15 @@ async function pdfTask(url,signal,small=false) {
   });
 }
 async function pdf(ctx) {
-  const task=await pdfTask(ctx.url,ctx.signal);
+  const progress=startProgress(ctx.host,'loadingPDF');
+  ctx.host.replaceChildren(progress.element);
+  let task;
+  try {task=await pdfTask(ctx.url,ctx.signal);}
+  catch(error) {progress.finish();throw error;}
   let stopped=false;
+  task.onProgress=({loaded,total})=>{
+    if (!stopped) progress.update('loadingPDF',loaded,total);
+  };
   function stopTask() {
     if (!stopped) {stopped=true;task.destroy().catch(()=>{});}
   }
@@ -1128,6 +1150,8 @@ async function pdf(ctx) {
   try {
     const pdfDoc=await task.promise;
     waitLive(ctx);
+    task.onProgress=null;
+    progress.update('renderingPage');
     const first=await pdfDoc.getPage(1);
     waitLive(ctx);
     const tools=toolbar(), scroll=node('div','preview-scroll pdf-scroll'), field=node('input'), total=node('output'), zoomLabel=node('output');
@@ -1160,6 +1184,7 @@ async function pdf(ctx) {
       pages.append(element);
     }
     scroll.append(pages);
+    progress.finish();
     ctx.host.replaceChildren(tools,scroll);
 
     function dimensions(item) {
@@ -1248,7 +1273,7 @@ async function pdf(ctx) {
     };
     ctx.signal.addEventListener('abort',cleanup,{once:true});
     return {destroy:cleanup,language:label};
-  } catch(e) {stopTask();throw e;}
+  } catch(e) {progress.finish();stopTask();throw e;}
 }
 
 function encodingSelect(ctx, detected) {
@@ -1418,7 +1443,25 @@ async function presentationView(ctx) {
     position.value=String(slide.page);position.max=String(slide.count);
     previous.disabled=slide.page<=1;next.disabled=slide.page>=slide.count;
     count.textContent='/ '+slide.count;
-    stage.replaceChildren(slidePage(slide,ctx.slideImage));
+    const page=slidePage(slide,ctx.slideImage);
+    stage.replaceChildren(page);
+    const images=[...page.querySelectorAll('img')];
+    const pendingImages=images.filter(image=>!image.complete);
+    if (pendingImages.length) {
+      const progress=startProgress(stage,'loadingSlideImages');
+      let loaded=images.length-pendingImages.length;
+      progress.update('loadingSlideImages',loaded,images.length,'count');
+      for (const image of pendingImages) {
+        const settle=()=>{
+          image.removeEventListener('load',settle);
+          image.removeEventListener('error',settle);
+          progress.update('loadingSlideImages',++loaded,images.length,'count');
+          if (loaded===images.length) progress.finish();
+        };
+        image.addEventListener('load',settle);
+        image.addEventListener('error',settle);
+      }
+    }
     const start=Math.max(1,Math.min(slide.page-2,slide.count-4));
     thumbnails.replaceChildren();
     for (let number=start;number<=Math.min(slide.count,start+4);number++) {

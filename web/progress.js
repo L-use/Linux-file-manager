@@ -1,4 +1,11 @@
-import {t} from './i18n.js';
+import {language,t} from './i18n.js';
+
+export function progressPercent(done,total) {
+  const ratio=total>0?Math.min(1,Math.max(0,done/total)):0;
+  return new Intl.NumberFormat(language==='zh'?'zh-CN':'en',{
+    style:'percent',minimumFractionDigits:2,maximumFractionDigits:2,
+  }).format(Math.floor(ratio*10000)/10000);
+}
 
 function createProgress(label='loading', compact=false) {
   const element=document.createElement('div');
@@ -14,7 +21,8 @@ function createProgress(label='loading', compact=false) {
     if (total>0) {
       bar.max=total;
       bar.value=Math.min(done,total);
-      amount.textContent=unit==='count'?`${bar.value} / ${total}`:`${Math.floor(100*bar.value/total)}%`;
+      const percent=progressPercent(bar.value,total);
+      amount.textContent=unit==='count'?`${percent} · ${bar.value} / ${total}`:percent;
     } else {
       bar.removeAttribute('value');
       amount.textContent='';

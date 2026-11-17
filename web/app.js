@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {startProgress,withProgress} from './progress.js';
+import {progressPercent,startProgress,withProgress} from './progress.js';
 import {language, setLanguage, t, translate} from './i18n.js';
 import {mountPreview, fileType, formatCategory, mountGridThumbnails} from './preview.js';
 import {createServerStatus} from './server-status.js';
@@ -120,10 +120,7 @@ function bytesPercent(bytes,total,complete=false) {
   return total>0?Math.min(1,bytes/total):Number(complete);
 }
 function meterText(bytes,total,rate,complete=false) {
-  const fraction=bytesPercent(bytes,total,complete);
-  const progress=new Intl.NumberFormat(language==='zh'?'zh-CN':'en',{
-    style:'percent',maximumFractionDigits:1,
-  }).format(fraction<1?Math.floor(fraction*1000)/1000:1);
+  const progress=total>0?progressPercent(bytes,total):progressPercent(Number(complete),1);
   return [progress,size(bytes)+' / '+size(total),size(Math.round(rate))+'/s'].join(' · ');
 }
 function sampleRate(meter,bytes) {
@@ -241,10 +238,11 @@ function moveHiddenPaths(source,destination) {
 
 const isPreviewFullscreen=()=>viewportFullscreen || (document.fullscreenElement || document.webkitFullscreenElement)===editorPane;
 let previewMoving=false;
-function previewNeighbors() {
+function previewNeighbors(mediaOnly=false) {
   if (!current) return [];
   const entries=orderChildren((cache.get(parent(current.path))||[]).filter(entry=>
-    entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && matchesFormat(entry) && fileType(entry).style!=='file')));
+    entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && matchesFormat(entry) &&
+      (mediaOnly?['image','video'].includes(fileType(entry).style):fileType(entry).style!=='file'))));
   const at=entries.findIndex(entry=>entry.path===current.path);
   return at<0?[]:[entries[at-1],entries[at+1]];
 }
@@ -256,14 +254,14 @@ function renderFullscreenButton() {
   button.setAttribute('aria-label',button.title);
 
 }
-async function navigatePreview(direction,focusTree=false) {
+async function navigatePreview(direction,focusTree=false,mediaOnly=false) {
   if (!current || previewMoving) return;
   const source=current;
   previewMoving=true;
   try {
     if (!cache.has(parent(source.path))) await loadDirectory(parent(source.path));
     if (current!==source) return;
-    const target=previewNeighbors()[direction<0?0:1];
+    const target=previewNeighbors(mediaOnly)[direction<0?0:1];
     if (target) await showFile(target,{focus:focusTree,closeDrawer:false});
   } finally {previewMoving=false;}
 }
@@ -663,16 +661,24 @@ async function locate(path) {
   if (!isVisiblePath(path)) revealHidden(true);
   if (mobileLayout.matches) setDrawer(true);
   search.value='';
-  const parts=path?path.split('/'):[];
-  let prefix='';
-  for (const part of ['',...parts]) {
-    prefix=part?join(prefix,part):'';
-    expanded.add(prefix);
-    if (!cache.has(prefix)) await loadDirectory(prefix);
-  }
-  selected=path;
-  renderTree(path);
-  document.activeElement.closest('.tree-row')?.scrollIntoView({block:'nearest'});
+  const prefixes=[''];
+  for (const part of path?path.split('/'):[]) prefixes.push(join(prefixes.at(-1),part));
+  const missing=prefixes.filter(prefix=>!cache.has(prefix));
+  const progress=missing.length?taskProgress('locatingFolder'):null;
+  let loaded=0;
+  progress?.update('locatingFolder',0,missing.length,'count');
+  try {
+    for (const prefix of prefixes) {
+      expanded.add(prefix);
+      if (missing.includes(prefix)) {
+        await loadDirectory(prefix);
+        progress?.update('locatingFolder',++loaded,missing.length,'count');
+      }
+    }
+    selected=path;
+    renderTree(path);
+    document.activeElement.closest('.tree-row')?.scrollIntoView({block:'nearest'});
+  } finally {progress?.finish();}
 }
 function targetDirectory() {
   const chosen=cache.get(parent(selected))?.find(entry=>entry.path===selected);
@@ -682,11 +688,12 @@ async function refresh(notify=false) {
   const newest=[...new Set([...expanded,...cache.keys()])].sort((a,b)=>a.split('/').length-b.split('/').length);
   if (!newest.includes('')) newest.unshift('');
   const progress=notify?taskProgress('refreshing'):null;
-  progress?.update('refreshing',0,newest.length,'count');
+  const total=newest.length+1;
+  progress?.update('refreshing',0,total,'count');
   try {
     for (const [index,path] of newest.entries()) {
       await loadDirectory(path);
-      progress?.update('refreshing',index+1,newest.length,'count');
+      progress?.update('refreshing',index+1,total,'count');
       if (path && directoryErrors.get(path)==='missing') {
         expanded.delete(path);
         directoryErrors.delete(path);
@@ -722,6 +729,7 @@ async function refresh(notify=false) {
     }
     while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
     renderTree();
+    progress?.update('refreshing',total,total,'count');
     if (notify) {
       if (directoryErrors.has('')) tell({error:directoryErrors.get('')});
       else toast('refreshed');
@@ -899,7 +907,7 @@ async function showFile(entry, options={}) {
     rememberImage(blob,version) {
       if (alive() && imageGeneration===imageCacheGeneration) rememberImage(url,version,blob);
     },
-    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,fullscreenActive:isPreviewFullscreen,encoding:options.encoding,
+    host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,fullscreenActive:isPreviewFullscreen,navigateMedia:direction=>navigatePreview(direction,false,true),encoding:options.encoding,
     showAs:format=>showFile(current,{format,encoding:options.encoding}),
     setEncoding:encoding=>showFile(current,{format:options.format,encoding}),
     getText:()=>json(query('text',entry.path,{encoding:options.encoding||'auto'}),{signal:controller.signal}),
@@ -1221,9 +1229,24 @@ function promptDialog(opts) {
   });
 }
 
+async function fileOperation(label,task) {
+  const progress=taskProgress(label);
+  progress.update(label,0,2,'count');
+  try {
+    const result=await task(()=>progress.update('refreshing',1,2,'count'));
+    progress.update(label,2,2,'count');
+    return result;
+  } finally {progress.finish();}
+}
+async function fetchEntryWithProgress(path) {
+  const progress=taskProgress('loading');
+  try {return await json(query('stat',path));}
+  finally {progress.finish();}
+}
+
 async function changePermissions(entry) {
   try {
-    const latest=await json(query('stat',entry.path));
+    const latest=await fetchEntryWithProgress(entry.path);
     if (latest.kind!==entry.kind) throw {error:'changed'};
     const isDirectory=latest.kind==='directory';
     const wasHidden=hiddenFolders.has(latest.path);
@@ -1236,14 +1259,19 @@ async function changePermissions(entry) {
     const chmod=permissions.slice(-3)!==latest.permissions;
     const visibilityChanged=isDirectory && result.hidden!==wasHidden;
     if (!chmod && !visibilityChanged) return;
-    if (chmod) await action({action:'chmod',path:latest.path,version:latest.version,permissions});
-    if (visibilityChanged) {
-      if (result.hidden) hiddenFolders.add(latest.path);
-      else hiddenFolders.delete(latest.path);
-      saveVisibility();
-      revealHidden(showHidden);
-    }
-    if (chmod) await refresh();
+    await fileOperation('savingChanges',async refreshing=>{
+      if (chmod) await action({action:'chmod',path:latest.path,version:latest.version,permissions});
+      if (visibilityChanged) {
+        if (result.hidden) hiddenFolders.add(latest.path);
+        else hiddenFolders.delete(latest.path);
+        saveVisibility();
+        revealHidden(showHidden);
+      }
+      if (chmod) {
+        refreshing();
+        await refresh();
+      }
+    });
     toast('operationDone');
   } catch(error) {tell(error);}
 }
@@ -1252,9 +1280,12 @@ async function createFolder(path) {
   const name=await promptDialog({title:'newFolder',field:'name'});
   if (name===null) return;
   try {
-    await action({action:'mkdir',path:join(path,name)});
-    expanded.add(path);
-    await refresh();
+    await fileOperation('creatingFolder',async refreshing=>{
+      await action({action:'mkdir',path:join(path,name)});
+      expanded.add(path);
+      refreshing();
+      await refresh();
+    });
     toast('operationDone');
   } catch(e) {tell(e);}
 }
@@ -1278,19 +1309,23 @@ async function changePath(entry,moving) {
   const decision=current && containsPath(original,current.path)?await reviewEdits():'clean';
   if (!decision) return;
   if (decision==='saved') {
-    try {entry=await json(query('stat',original));} catch (error) {tell(error);return;}
+    try {entry=await fetchEntryWithProgress(original);} catch (error) {tell(error);return;}
   }
   const value=await promptDialog({title:moving?'move':'rename',field:moving?'moveTarget':'name',value:moving?parent(original):entry.name});
   if (value===null) return;
   const destination=moving?join(value,entry.name):join(parent(original),value);
   if (destination===original) return;
   const body={action:'move',path:original,destination,version:entry.version};
+  const label=moving?'movingItem':'renamingItem';
+  const progress=taskProgress(label);
+  progress.update(label,0,2,'count');
   try {
     try {await action(body);} catch(error) {
       if (!moving || error.error!=='conflict' || !error.replaceable || entry.kind!=='file') throw error;
       if (!await promptDialog({title:'replacePrompt',values:{name:entry.name},submit:'replace',danger:true})) return;
       await action({...body,overwrite:error.version});
     }
+    progress.update('refreshing',1,2,'count');
     moveHiddenPaths(original,destination);
     const related=(path)=>path===original||path.startsWith(original+'/');
     const updated=(path)=>destination+path.slice(original.length);
@@ -1305,20 +1340,25 @@ async function changePath(entry,moving) {
     await refresh();
     toast('operationDone');
   } catch(e) {tell(e);}
+  finally {progress.finish();}
 }
 async function deleteEntry(entry) {
   const decision=current && containsPath(entry.path,current.path)?await reviewEdits():'clean';
   if (!decision) return;
   if (decision==='saved') {
-    try {entry=await json(query('stat',entry.path));} catch (error) {tell(error);return;}
+    try {entry=await fetchEntryWithProgress(entry.path);} catch (error) {tell(error);return;}
   }
   if (!await promptDialog({title:'deleteQuestion',values:{name:entry.name},message:entry.kind==='directory'?'deleteDirectory':'',submit:'delete',danger:true})) return;
   try {
-    const item=await action({action:'delete',path:entry.path,version:entry.version});
-    const related=(path)=>path===entry.path||path.startsWith(entry.path+'/');
-    if (current && related(current.path)) closePreview(true);
-    if (related(selected)) selected=parent(entry.path);
-    await refresh();
+    const item=await fileOperation('deletingFiles',async refreshing=>{
+      const item=await action({action:'delete',path:entry.path,version:entry.version});
+      const related=(path)=>path===entry.path||path.startsWith(entry.path+'/');
+      if (current && related(current.path)) closePreview(true);
+      if (related(selected)) selected=parent(entry.path);
+      refreshing();
+      await refresh();
+      return item;
+    });
     toast('trashMoved',{name:entry.name},false,{id:item.id,label:'undo',icon:'restore',run:()=>withProgress($('toasts'),'restoringTrash',()=>changeTrash(item,'restore'))});
   } catch(e) {tell(e);}
 }
@@ -1424,7 +1464,7 @@ function rootSettings(signal) {
   input.onkeydown=event=>{if (event.key==='Enter' && !save.disabled) save.click();};
   section.append(label,field,status,info,actions);
   controls();
-  json('/api/settings/root',{signal}).then(data=>{
+  withProgress(section,'loading',()=>json('/api/settings/root',{signal})).then(data=>{
     input.value=data.root;
     loaded=true;
     writable=data.writable;
@@ -1590,7 +1630,7 @@ function updateSettings(signal) {
   body.append(details,versionField,actions,feedback,versionsHint,modes,hint);
   paintVersions();
   loadVersions();
-  json('/api/updates',{signal:signal}).then(paint).catch(error=>{
+  withProgress(body,'loading',()=>json('/api/updates',{signal})).then(paint).catch(error=>{
     if (!signal.aborted) feedback.textContent=errorOf(error);
   });
   return body;
@@ -1710,6 +1750,7 @@ function cacheSettings(signal) {
   body.append(description,stats,limitLabel,slider,actions,status);
   signal.addEventListener('abort',()=>clearTimeout(timer),{once:true});
   paint();
+  const initialProgress=startProgress(body,'loading');
   async function refreshStats() {
     if (!busy && !body.hidden) {
       const requested=revision;
@@ -1719,7 +1760,7 @@ function cacheSettings(signal) {
         if (!busy && requested===revision && !signal.aborted) apply(data);
       } catch(error) {
         if (!snapshot && !signal.aborted) status.textContent=errorOf(error);
-      }
+      } finally {initialProgress.finish();}
     }
     if (!signal.aborted) timer=setTimeout(refreshStats,1500);
   }
@@ -2187,17 +2228,24 @@ async function droppedEntries(items,state) {
 }
 function refreshUploadMeter(state) {
   const panel=$('upload-panel');
-  const bar=panel.querySelector('progress');
+  const bar=panel.querySelector('.upload-file-progress');
   const info=panel.querySelector('.transfer-meter');
   if (!bar || !info) return;
   const total=panel.querySelector('.total-upload-meter progress');
-  if (total) total.value=bytesPercent(state.completedBytes+state.sent,state.plannedBytes)*100;
+  if (total) {
+    const sent=state.completedBytes+(state.active?.file?state.sent:0);
+    total.value=bytesPercent(sent,state.plannedBytes)*100;
+    panel.querySelector('.upload-total-value').textContent=progressPercent(sent,state.plannedBytes);
+  }
   const file=state.active?.file;
   if (!file) {
-    bar.hidden=info.hidden=true;
+    bar.removeAttribute('value');
+    info.hidden=true;
     return;
   }
   bar.hidden=info.hidden=false;
+  const summary=panel.querySelector('.upload-summary');
+  summary.textContent=t(state.sentBody?'uploadCommitting':'uploading',state);
   bar.value=bytesPercent(state.sent,file.size,state.sentBody)*100;
   info.textContent=meterText(state.sent,file.size,state.meter.rate,state.sentBody);
 }
@@ -2220,13 +2268,16 @@ function paintUpload() {
   const summary=document.createElement('p');
   summary.className='upload-summary';
   if (uploadState) {
-    summary.textContent=t(uploadState.total?'uploading':'scanningUpload',uploadState);
+    const phase=uploadState.refreshing?'refreshing':!uploadState.total?'scanningUpload':
+      uploadState.active?.file?'uploading':'creatingFolder';
+    summary.textContent=t(phase,uploadState);
     const name=document.createElement('span');
     name.className='truncate';
     name.textContent=name.title=uploadState.active?.path || '';
     const progress=document.createElement('progress');
     progress.max=100;
-    progress.dataset.label='uploadProgress';
+    progress.className='upload-file-progress';
+    progress.dataset.label=phase;
     const info=document.createElement('small');
     info.className='transfer-meter';
     panel.append(summary,progress,name,info);
@@ -2238,7 +2289,9 @@ function paintUpload() {
       const total=document.createElement('progress');
       total.max=100;
       total.dataset.label='uploadTotalProgress';
-      group.append(label,total);
+      const value=document.createElement('span');
+      value.className='upload-total-value';
+      group.append(label,total,value);
       panel.append(group);
     }
     refreshUploadMeter(uploadState);
@@ -2364,13 +2417,19 @@ async function uploadEntries(path,readEntries,prior={done:0,skipped:0}) {
   } catch(error) {
     if (!state.cancelled) tell({error:error?.error || 'readLocal'});
   } finally {
-    uploadState=null;
-    const currentSession=signedIn && generation===session;
-    if (currentSession && state.total) uploadResult={path,done,skipped,pending,plannedBytes:state.plannedBytes,completedBytes:state.completedBytes,showTotal:state.showTotal};
-    paintUpload();
-    if (currentSession && state.total) {
-      expanded.add(path);
-      await refresh();
+    try {
+      if (signedIn && generation===session && state.total) {
+        state.refreshing=true;
+        paintUpload();
+        expanded.add(path);
+        await refresh();
+      }
+    } finally {
+      if (uploadState===state) uploadState=null;
+      if (signedIn && generation===session && state.total) {
+        uploadResult={path,done,skipped,pending,plannedBytes:state.plannedBytes,completedBytes:state.completedBytes,showTotal:state.showTotal};
+      }
+      paintUpload();
     }
   }
 }
