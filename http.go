@@ -140,6 +140,16 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		}
 		return respond(w, result)
 	})
+	register("POST /api/settings/root/check", true, func(w http.ResponseWriter, r *http.Request) error {
+		var input rootSetting
+		if err := parseJSON(w, r, &input); err != nil {
+			return err
+		}
+		if err := settings.validateRoot(input.Root); err != nil {
+			return err
+		}
+		return respond(w, map[string]bool{"ok": true})
+	})
 	register("POST /api/settings/restart", true, func(w http.ResponseWriter, r *http.Request) error {
 		if err := updates.restartService(); err != nil {
 			return err

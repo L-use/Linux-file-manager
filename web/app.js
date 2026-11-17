@@ -1236,41 +1236,59 @@ function rootSettings(signal) {
   const info=document.createElement('p');
   const status=document.createElement('output');
   status.setAttribute('aria-live','polite');
-  async function saveRoot() {
-    if (save.disabled) return;
-    restart.disabled=save.disabled=input.disabled=true;
-    try {
-      const data=await json('/api/settings/root',{method:'PUT',body:{root:input.value}});
-      input.value=data.root;
-      status.textContent=t('rootSaved');
-    } catch(error) {status.textContent=errorOf(error);}
-    finally {restart.disabled=save.disabled=input.disabled=false;}
+  let loaded=false, writable=false, busy=false;
+  function controls() {
+    input.disabled=!writable || busy;
+    check.disabled=save.disabled=input.disabled || input.value==='';
+    restart.disabled=!loaded || busy;
   }
-  const save=makeButton('save','check',saveRoot,'button',true);
-  save.disabled=true;
+  async function run(task) {
+    busy=true;
+    controls();
+    try {await task();}
+    catch(error) {if (!signal.aborted) feedback(errorOf(error),true);}
+    finally {busy=false;controls();}
+  }
+  function feedback(message, failed=false, success=false) {
+    status.textContent=message;
+    status.classList.toggle('root-check-error',failed);
+    status.classList.toggle('root-check-success',success);
+  }
+  const check=makeButton('rootCheck','search',()=>run(async()=>{
+    feedback(t('rootChecking'));
+    await json('/api/settings/root/check',{method:'POST',body:{root:input.value},signal});
+    feedback(t('rootVerified'),false,true);
+  }),'button',true);
+  const save=makeButton('save','check',()=>run(async()=>{
+    const data=await json('/api/settings/root',{method:'PUT',body:{root:input.value}});
+    input.value=data.root;
+    feedback(t('rootSaved'));
+  }),'button',true);
   const restart=makeButton('restartService','refresh',async()=>{
     if (!await reviewEdits() || !window.confirm(t('restartConfirm'))) return;
-    const writable=!save.disabled;
-    restart.disabled=save.disabled=input.disabled=true;
-    status.textContent=t('updateRestarting');
-    try {
+    await run(async()=>{
+      feedback(t('updateRestarting'));
       await json('/api/settings/restart',{method:'POST'});
       await waitForRestart(status);
-    } catch(error) {status.textContent=errorOf(error);}
-    finally {restart.disabled=false;save.disabled=input.disabled=!writable;}
+    });
   },'button',true);
-  restart.disabled=true;
+  const field=document.createElement('div');
+  field.className='settings-root-field';
+  field.append(input,check);
   const actions=document.createElement('div');
   actions.className='cache-actions';
   actions.append(save,restart);
-  input.onkeydown=event=>{if (event.key==='Enter') saveRoot();};
-  section.append(label,input,info,actions,status);
+  input.oninput=()=>{feedback('');controls();};
+  input.onkeydown=event=>{if (event.key==='Enter' && !save.disabled) save.click();};
+  section.append(label,field,status,info,actions);
+  controls();
   json('/api/settings/root',{signal}).then(data=>{
     input.value=data.root;
-    save.disabled=input.disabled=!data.writable;
-    restart.disabled=false;
+    loaded=true;
+    writable=data.writable;
+    controls();
     info.textContent=t(data.writable?'rootActive':'rootOverride',{path:data.active});
-  }).catch(error=>{if (!signal.aborted) status.textContent=errorOf(error);});
+  }).catch(error=>{if (!signal.aborted) feedback(errorOf(error),true);});
   return section;
 }
 
@@ -1300,7 +1318,17 @@ function openUpdates() {
   const body=document.createElement('section');
   body.className='settings-body';
   const controller=new AbortController();
-  const versions=document.createElement('p'), feedback=document.createElement('output'), hint=document.createElement('p');
+  const feedback=document.createElement('output'), hint=document.createElement('p');
+  const details=document.createElement('dl');
+  details.className='cache-stats';
+  const fields={};
+  for (const [key,label] of [['current','updateVersionCurrent'],['latest','updateVersionLatest'],['platform','installationPlatform'],['date','installationDate']]) {
+    const term=document.createElement('dt'), value=document.createElement('dd');
+    term.dataset.i18n=label;
+    value.textContent='—';
+    fields[key]={term,value};
+    details.append(term,value);
+  }
   hint.dataset.i18n='updateHelp';
   feedback.setAttribute('aria-live','polite');
   const modes=document.createElement('fieldset');
@@ -1312,7 +1340,16 @@ function openUpdates() {
   const radios={};
   function paint(data) {
     state=data;
-    versions.textContent=t('updateVersions',{current:data.current,latest:data.latest || '—'});
+    fields.current.value.textContent=data.current;
+    fields.latest.value.textContent=data.latest || '—';
+    fields.platform.value.textContent=data.platform || '—';
+    const date=data.installedAt && new Date(data.installedAt);
+    const dateLabel=data.installationExact?'installationDate':'installationObservedDate';
+    fields.date.term.dataset.i18n=dateLabel;
+    fields.date.term.textContent=t(dateLabel);
+    fields.date.value.textContent=date && Number.isFinite(date.valueOf())
+      ? new Intl.DateTimeFormat(language==='zh'?'zh-CN':'en',{dateStyle:'medium'}).format(date)
+      : '—';
     modes.disabled=false;
     radios[data.mode].checked=true;
     radios.auto.disabled=!data.supported;
@@ -1359,7 +1396,7 @@ function openUpdates() {
   const actions=document.createElement('div');
   actions.className='cache-actions';
   actions.append(check,install);
-  body.append(versions,modes,hint,actions,feedback);
+  body.append(details,actions,feedback,modes,hint);
   if (!openToolPanel('checkUpdates',body,()=>controller.abort())) return;
   json('/api/updates',{signal:controller.signal}).then(paint).catch(error=>{
     if (!controller.signal.aborted) feedback.textContent=errorOf(error);

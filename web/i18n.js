@@ -3,6 +3,7 @@ const strings = {
  restartConfirm:['现在重启服务？重启后需要重新登录。','Restart the service now? You will need to sign in again.'],
  restartReconnect:['暂未重新连接。请刷新页面或查看服务日志。','Could not reconnect yet. Refresh the page or check the service log.'],
 
+ rootCheck:['检查','Check'], rootChecking:['正在验证目录…','Checking directory…'], rootVerified:['验证成功','Directory verified'],
  rootLabel:['管理目录','Managed directory'], rootActive:['当前访问目录 {path}。保存后点击「重启服务」生效。','Current directory {path}. Select Restart service after saving.'],
  rootSaved:['目录已写入配置。重启服务后生效。','Directory saved. Restart the service to apply it.'],
  rootOverride:['启动参数 --root 覆盖了配置。当前访问 {path}。','The --root startup flag overrides the configuration. Current directory {path}.'],
@@ -10,7 +11,9 @@ const strings = {
  checkUpdates:['检查更新','Check for updates'], updateMode:['更新方式','Update mode'],
  updateManual:['手动检查','Check manually'], updateRemind:['有新版时提醒','Notify me about new versions'], updateAuto:['自动安装最新正式版','Install the latest stable release automatically'],
  updateHelp:['检查更新需要服务器能访问 GitHub。安装新版时服务会重启，需要重新登录。','The server needs access to GitHub. Installing an update restarts the service and requires signing in again.'],
- updateVersions:['当前 {current} · 最新 {latest}','Current {current} · Latest {latest}'], checkingUpdates:['正在检查更新…','Checking for updates…'],
+ updateVersionCurrent:['当前版本','Installed version'], updateVersionLatest:['最新版本','Latest version'],
+ installationPlatform:['系统架构','Platform'], installationDate:['安装日期','Installation date'],
+ installationObservedDate:['首次记录日期','First recorded date'], checkingUpdates:['正在检查更新…','Checking for updates…'],
  updateAvailable:['发现新版本 {version}。','Version {version} is available.'], updateCurrent:['当前已是最新版本。','You are up to date.'],
  updateUnsupported:['此构建不支持程序内更新。','In-app updates are unavailable for this build.'],
  updateUnavailable:['更新已不可用，请重新检查。','Update unavailable. Check again.'],

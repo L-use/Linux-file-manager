@@ -27,6 +27,8 @@ import (
 
 const releaseRepository = "L-use/Linux-file-manager"
 const updateModeFile = "release-update-mode"
+const installationMarker = "filemanager.installed-at"
+const installationSeenFile = "installation-first-observed"
 const updateBinaryLimit = 64 << 20
 const updateBackupName = uploadPrefix + "update-previous"
 
@@ -34,24 +36,29 @@ var buildVersion = "dev"
 var releaseTag = regexp.MustCompile(`^v([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})$`)
 
 type releaseUpdate struct {
-	Current   string `json:"current"`
-	Latest    string `json:"latest,omitempty"`
-	Mode      string `json:"mode"`
-	Available bool   `json:"available"`
-	Supported bool   `json:"supported"`
+	Current           string `json:"current"`
+	Latest            string `json:"latest,omitempty"`
+	Mode              string `json:"mode"`
+	Available         bool   `json:"available"`
+	Supported         bool   `json:"supported"`
+	Platform          string `json:"platform"`
+	InstalledAt       string `json:"installedAt,omitempty"`
+	InstallationExact bool   `json:"installationExact"`
 }
 
 type releaseUpdater struct {
-	client     *http.Client
-	executable string
-	state      string
-	ready      chan string
-	changed    chan struct{}
-	mu         sync.Mutex
-	mode       string
-	latest     string
-	checked    time.Time
-	installing bool
+	client            *http.Client
+	executable        string
+	state             string
+	ready             chan string
+	changed           chan struct{}
+	mu                sync.Mutex
+	mode              string
+	latest            string
+	checked           time.Time
+	installing        bool
+	installedAt       string
+	installationExact bool
 }
 
 func newReleaseUpdater(executable, state string) *releaseUpdater {
@@ -69,7 +76,35 @@ func newReleaseUpdater(executable, state string) *releaseUpdater {
 			u.mode = mode
 		}
 	}
+	u.installedAt, u.installationExact = installationDate(filepath.Dir(executable), state, time.Now)
 	return u
+}
+
+func installationDate(appDir, state string, now func() time.Time) (string, bool) {
+	read := func(path string) string {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return ""
+		}
+		date, err := time.Parse(time.RFC3339, strings.TrimSpace(string(data)))
+		if err != nil || date.IsZero() {
+			return ""
+		}
+		return date.UTC().Format(time.RFC3339)
+	}
+	if date := read(filepath.Join(appDir, installationMarker)); date != "" {
+		return date, true
+	}
+	record := filepath.Join(state, installationSeenFile)
+	if date := read(record); date != "" {
+		return date, false
+	}
+	date := now().UTC().Format(time.RFC3339)
+	if err := writePrivateSetting(record, []byte(date+"\n"), 0600); err != nil {
+		log.Printf("Record installation date: %v", err)
+		return "", false
+	}
+	return date, false
 }
 
 func validUpdateMode(mode string) bool {
@@ -118,7 +153,12 @@ func newerRelease(latest, current string) bool {
 func (u *releaseUpdater) status() releaseUpdate {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return releaseUpdate{Current: buildVersion, Latest: u.latest, Mode: u.mode, Available: newerRelease(u.latest, buildVersion), Supported: supportedUpdate()}
+	return releaseUpdate{
+		Current: buildVersion, Latest: u.latest, Mode: u.mode,
+		Available: newerRelease(u.latest, buildVersion), Supported: supportedUpdate(),
+		Platform:    runtime.GOOS + "/" + runtime.GOARCH,
+		InstalledAt: u.installedAt, InstallationExact: u.installationExact,
+	}
 }
 
 func (u *releaseUpdater) request(ctx context.Context, url string) (*http.Response, error) {

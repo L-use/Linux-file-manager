@@ -312,7 +312,7 @@ func run(ready, inheritedLock *os.File) error {
 			return err
 		}
 	}
-	protected = append(protected, settingsPath)
+	protected = append(protected, settingsPath, filepath.Join(appDir, installationMarker))
 	webSettings := &webConfig{path: settingsPath, activeRoot: rootAbs, overridden: *root != "", protected: protected}
 	for _, internal := range protected {
 		if inside(internal, rootAbs) {

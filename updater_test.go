@@ -4,10 +4,12 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 type updateTestTransport func(*http.Request) (*http.Response, error)
@@ -44,5 +46,25 @@ func TestReleaseDownloadRejectsInvalidChecksum(t *testing.T) {
 	})
 	if file, err := u.download(context.Background(), "v1.0.6"); file != "" || err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("download returned %q, %v", file, err)
+	}
+}
+
+func TestInstallationDateSurvivesRestartAndUsesInstallerRecord(t *testing.T) {
+	app, state := t.TempDir(), t.TempDir()
+	first := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	now := func() time.Time { return first }
+	if date, exact := installationDate(app, state, now); exact || date != first.Format(time.RFC3339) {
+		t.Fatalf("first observation: %s, exact=%v", date, exact)
+	}
+	later := func() time.Time { return first.Add(7 * 24 * time.Hour) }
+	if date, exact := installationDate(app, state, later); exact || date != first.Format(time.RFC3339) {
+		t.Fatalf("restarted observation: %s, exact=%v", date, exact)
+	}
+	installed := first.Add(-24 * time.Hour).Format(time.RFC3339)
+	if err := os.WriteFile(filepath.Join(app, installationMarker), []byte(installed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if date, exact := installationDate(app, state, later); !exact || date != installed {
+		t.Fatalf("installer date: %s, exact=%v", date, exact)
 	}
 }

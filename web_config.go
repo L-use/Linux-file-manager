@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"golang.org/x/sys/unix"
 )
 
 type webConfig struct {
@@ -45,43 +47,45 @@ func (c *webConfig) setting() (rootSetting, error) {
 	return rootSetting{Root: cfg.Root, Active: c.activeRoot, Writable: !c.overridden}, err
 }
 
+func (c *webConfig) validateRoot(value string) error {
+	if value == "" || (!strings.HasPrefix(value, "~") && !filepath.IsAbs(value)) || strings.ContainsAny(value, "\x00\r\n") {
+		return failure(400, "rootInvalid")
+	}
+	root, err := configPath(value, filepath.Dir(c.path))
+	if err != nil {
+		return failure(400, "rootInvalid")
+	}
+	root, err = canonical(root)
+	if err != nil {
+		return err
+	}
+	for _, name := range c.protected {
+		if inside(name, root) {
+			return failure(403, "protected")
+		}
+	}
+	fd, err := unix.Open(root, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOTDIR) {
+		return failure(400, "rootInvalid")
+	}
+	if err != nil {
+		return err
+	}
+	probe := os.NewFile(uintptr(fd), root)
+	defer probe.Close()
+	if _, err := probe.ReadDir(1); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
+}
+
 func (c *webConfig) save(value string) (rootSetting, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.overridden {
 		return rootSetting{}, failure(409, "rootOverride")
 	}
-	if value == "" || (!strings.HasPrefix(value, "~") && !filepath.IsAbs(value)) || strings.ContainsAny(value, "\x00\r\n") {
-		return rootSetting{}, failure(400, "rootInvalid")
-	}
-	root, err := configPath(value, filepath.Dir(c.path))
-	if err != nil {
-		return rootSetting{}, failure(400, "rootInvalid")
-	}
-	root, err = canonical(root)
-	if err != nil {
-		return rootSetting{}, err
-	}
-	for _, name := range c.protected {
-		if inside(name, root) {
-			return rootSetting{}, failure(403, "protected")
-		}
-	}
-	probe, err := os.Open(root)
-	if err != nil {
-		return rootSetting{}, err
-	}
-	info, err := probe.Stat()
-	if err != nil || !info.IsDir() {
-		probe.Close()
-		if err != nil {
-			return rootSetting{}, err
-		}
-		return rootSetting{}, failure(400, "rootInvalid")
-	}
-	_, err = probe.ReadDir(1)
-	probe.Close()
-	if err != nil && !errors.Is(err, io.EOF) {
+	if err := c.validateRoot(value); err != nil {
 		return rootSetting{}, err
 	}
 

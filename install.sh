@@ -327,6 +327,10 @@ fi
 [ ! -e "$config" ] && [ ! -L "$config" ] || [ -f "$config" ] ||
   fail "Configuration is not a regular file: $config" "配置不是普通文件：$config"
 
+first_install=false
+if [ ! -e "$program" ] && [ ! -e "$install_dir/filemanager.installed-at" ] && [ ! -L "$install_dir/filemanager.installed-at" ]; then
+  first_install=true
+fi
 staged_program=$(mktemp "$install_dir/.filemanager.XXXXXXXX")
 cp -- "$work/filemanager" "$staged_program"
 chmod 0755 "$staged_program"
@@ -358,6 +362,9 @@ write_setting() {
   mv -f -- "$staged_setting" "$install_dir/$1"
   staged_setting=
 }
+if [ "$first_install" = true ]; then
+  write_setting filemanager.installed-at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+fi
 write_setting filemanager.language "$lang"
 write_setting filemanager.command "$link"
 if [ "$register_service" = true ]; then
