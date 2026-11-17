@@ -616,6 +616,7 @@ function renderGrid() {
   gridPreview=new AbortController();
   $('grid-progress').replaceChildren();
   const host=$('preview-host');
+  host.classList.remove('drop-target');
   rememberGridScroll();
   const prior=gridScrollPositions.get(gridPath) || 0;
   const entries=cache.get(gridPath);
@@ -903,6 +904,7 @@ async function showFile(entry, options={}) {
     returnTile=options.fromGrid?entry.path:null;
   }
   gridPreview?.abort();
+  $('preview-host').classList.remove('drop-target');
   const id=++previewId;
   activePreview?.destroy();
   current=entry;
@@ -2598,26 +2600,39 @@ for (const input of [$('files'),$('folder-files')]) {
     if (files.length) uploadEntries(uploadDirectory,()=>pickedEntries(files,input.id==='folder-files'));
   };
 }
-const explorer=$('explorer');
-explorer.ondragover=(e)=>{
-  if (!e.dataTransfer.types.includes('Files')) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect=uploadState?'none':'copy';
-  explorer.classList.toggle('drop-target',!uploadState);
-};
-explorer.ondragleave=(e)=>{
-  if (!explorer.contains(e.relatedTarget)) explorer.classList.remove('drop-target');
-};
-explorer.ondrop=(e)=>{
-  explorer.classList.remove('drop-target');
-  if (!e.dataTransfer.types.includes('Files')) return;
-  e.preventDefault();
-  const path=targetDirectory();
-  const items=[...e.dataTransfer.items].filter(item=>item.kind==='file').map(item=>({
-    entry:item.webkitGetAsEntry?.(),file:item.getAsFile()
-  }));
-  uploadEntries(path,state=>items.length?droppedEntries(items,state):pickedEntries([...e.dataTransfer.files],false));
-};
+function enableDropUpload(surface,destination) {
+  surface.ondragover=event=>{
+    if (!event.dataTransfer?.types.includes('Files')) return;
+    event.preventDefault();
+    const allowed=!uploadState && destination()!==null;
+    event.dataTransfer.dropEffect=allowed?'copy':'none';
+    surface.classList.toggle('drop-target',allowed);
+  };
+  surface.ondragleave=event=>{
+    if (!surface.contains(event.relatedTarget)) surface.classList.remove('drop-target');
+  };
+  surface.ondrop=event=>{
+    surface.classList.remove('drop-target');
+    const transfer=event.dataTransfer;
+    if (!transfer?.types.includes('Files')) return;
+    event.preventDefault();
+    const path=destination();
+    if (path===null || uploadState) return;
+    // Capture the drag data synchronously before the browser clears the drop event.
+    const items=Array.from(transfer.items || []).filter(item=>item.kind==='file').map(item=>({
+      entry:item.webkitGetAsEntry?.() || item.getAsEntry?.(),file:item.getAsFile(),
+    }));
+    const files=Array.from(transfer.files);
+    uploadEntries(path,state=>items.length?droppedEntries(items,state):pickedEntries(files,false));
+  };
+}
+
+enableDropUpload($('explorer'),targetDirectory);
+const previewHost=$('preview-host');
+enableDropUpload(previewHost,()=>{
+  const grid=previewHost.querySelector('.file-grid');
+  return !current && grid?.dataset.path===gridPath?gridPath:null;
+});
 $('refresh').onclick=()=>refresh(true);
 $('settings').innerHTML=icon('settings');
 $('settings').onclick=openSettings;
