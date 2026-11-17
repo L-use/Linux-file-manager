@@ -418,6 +418,59 @@ function updateGridButton() {
   const button=$('open-grid');
   button.setAttribute('aria-pressed',String(gridPath!==null));
 }
+function gridDragSelection(grid, tiles) {
+  let drag;
+  const rectangle=document.createElement('div');
+  rectangle.className='grid-marquee';
+  rectangle.setAttribute('aria-hidden','true');
+  grid.onpointerdown=event=>{
+    if (bulkBusy || event.button!==0 || event.pointerType!=='mouse' || event.target.closest('.tile-more,input')) return;
+    drag={id:event.pointerId,x:event.clientX,y:event.clientY,origin:event.target.closest('.file-tile'),scroll:grid.scrollTop};
+  };
+  grid.onpointermove=event=>{
+    if (!drag || drag.id!==event.pointerId || !(event.buttons&1)) return;
+    if (!drag.initial) {
+      if (Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<6) return;
+      drag.initial=new Map(marked);
+      grid.setPointerCapture(event.pointerId);
+      grid.append(rectangle);
+    }
+    const bounds=grid.getBoundingClientRect();
+    const startY=drag.y+drag.scroll-grid.scrollTop;
+    const left=Math.max(bounds.left,Math.min(drag.x,event.clientX));
+    const right=Math.min(bounds.right,Math.max(drag.x,event.clientX)+1);
+    const top=Math.max(bounds.top,Math.min(startY,event.clientY));
+    const bottom=Math.min(bounds.bottom,Math.max(startY,event.clientY)+1);
+    Object.assign(rectangle.style,{left:left+'px',top:top+'px',width:Math.max(0,right-left)+'px',height:Math.max(0,bottom-top)+'px'});
+    for (const [tile,entry] of tiles) {
+      const box=tile.getBoundingClientRect();
+      const hit=tile===drag.origin || (box.left<right && box.right>left && box.top<bottom && box.bottom>top);
+      const checked=hit || drag.initial.has(entry.path);
+      if (checked) marked.set(entry.path,entry);
+      else marked.delete(entry.path);
+      tile.classList.toggle('marquee-selected',checked);
+      const checkbox=tile.querySelector('.row-selection');
+      if (checkbox) checkbox.checked=checked;
+    }
+    if (selecting) updateBulkActions();
+  };
+  const finish=event=>{
+    if (!drag || drag.id!==event.pointerId) return;
+    const initial=drag.initial;
+    drag=null;
+    if (!initial) return;
+    if (event.type==='pointerup') {
+      selecting=true;
+    } else {
+      marked.clear();
+      for (const [path, entry] of initial) marked.set(path,entry);
+    }
+    renderTree();
+  };
+  grid.onpointerup=grid.onpointercancel=grid.onlostpointercapture=finish;
+  grid.onpointerleave=()=>{if (!drag?.initial) drag=null;};
+}
+
 function renderGrid() {
   if (gridPath===null || current) return;
   updateGridButton();
@@ -435,6 +488,7 @@ function renderGrid() {
   if (gridPath) headline.prepend(makeButton('parentFolder','chevron',()=>openGrid(parent(gridPath))));
   const grid=document.createElement('div');
   grid.className='file-grid';
+  const tiles=new Map();
   const filter=search.value.trim().toLocaleLowerCase();
   for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && item.name.toLocaleLowerCase().includes(filter)))) {
     const tile=document.createElement('div');
@@ -451,7 +505,7 @@ function renderGrid() {
       const small=entry.size<1024*1024;
       if (small || ['jpg','jpeg','png'].includes(type.ext)) {
         const image=document.createElement('img');
-        image.loading='lazy';image.decoding='async';image.alt='';
+        image.loading='lazy';image.decoding='async';image.alt='';image.draggable=false;
         image.src=small?fileURL(entry.path):query('thumbnail',entry.path,{edge:240});
         image.onerror=()=>image.remove();
         preview.append(image);
@@ -465,9 +519,11 @@ function renderGrid() {
     tile.append(button,makeButton('more','more',event=>itemMenu(entry,event.currentTarget),'icon-button tile-more'));
     if (selecting) tile.append(selectionCheckbox(entry));
     tile.oncontextmenu=event=>{event.preventDefault();itemMenu(entry,button,{x:event.clientX,y:event.clientY});};
+    tiles.set(tile,entry);
     grid.append(tile);
   }
   if (!grid.children.length) grid.append(directoryNote(filter?'noMatches':'emptyFolder',0));
+  else gridDragSelection(grid,tiles);
   host.replaceChildren(headline,grid);
   grid.scrollTop=prior;
   translate(host);
@@ -1166,19 +1222,82 @@ function openSettings() {
   body.className='settings-body';
   const description=document.createElement('p');
   description.dataset.i18n='cacheHelp';
+  const stats=document.createElement('dl');
+  stats.className='cache-stats';
+  const usage={};
+  for (const [key,label] of [['total','cacheTotal'],['thumbnails','cacheThumbnails'],['videos','cacheVideos']]) {
+    const term=document.createElement('dt'), value=document.createElement('dd');
+    term.dataset.i18n=label;
+    value.textContent='—';
+    usage[key]=value;
+    stats.append(term,value);
+  }
+  const slider=document.createElement('input');
+  slider.type='range';slider.min='64';slider.max='4096';slider.step='64';slider.value='1024';
+  slider.id='preview-cache-limit';
+  const limitLabel=document.createElement('label');
+  limitLabel.htmlFor=slider.id;
+  limitLabel.className='cache-limit-label';
+  const label=document.createElement('span');
+  label.dataset.i18n='cacheLimit';
+  const amount=document.createElement('output');
+  limitLabel.append(label,amount);
   const status=document.createElement('output');
   status.setAttribute('aria-live','polite');
-  const clear=makeButton('clearCache','trash',async()=>{
-    clear.disabled=true;
+  const controller=new AbortController();
+  let snapshot, busy=false, revision=0, timer;
+  function paint() {
+    amount.textContent=slider.value+' MiB';
+    slider.setAttribute('aria-valuetext',amount.textContent);
+    slider.disabled=busy || !snapshot;
+    clear.disabled=busy || !snapshot;
+    save.disabled=busy || !snapshot || Number(slider.value)===snapshot.limitMiB;
+  }
+  function apply(data) {
+    const editing=snapshot && Number(slider.value)!==snapshot.limitMiB;
+    snapshot=data;
+    const {thumbnails,videos}=data;
+    usage.total.textContent=size(thumbnails.bytes+videos.bytes)+' / '+size(data.limitMiB*1024*1024);
+    for (const key of ['thumbnails','videos']) usage[key].textContent=size(data[key].bytes)+' · '+data[key].count;
+    if (!editing) slider.value=String(data.limitMiB);
+    paint();
+  }
+  async function change(route,options,message) {
+    revision++;
+    busy=true;
+    paint();
     status.textContent='';
     try {
-      await json('/api/cache/clear',{method:'POST'});
-      status.textContent=t('cacheCleared');
-    } catch(error) {status.textContent=errorOf(error);}
-    finally {clear.disabled=false;}
-  },'button',true);
-  body.append(description,clear,status);
-  openToolPanel('settings',body);
+      const data=await json(route,{...options,signal:controller.signal});
+      slider.value=String(snapshot.limitMiB);
+      apply(data);
+      status.textContent=t(message);
+    } catch(error) {
+      if (!controller.signal.aborted) status.textContent=errorOf(error);
+    } finally {busy=false;paint();}
+  }
+  const save=makeButton('cacheSave','check',()=>change('/api/cache',{method:'PUT',body:{limitMiB:Number(slider.value)}},'cacheSaved'),'button',true);
+  const clear=makeButton('clearCache','trash',()=>change('/api/cache/clear',{method:'POST'},'cacheCleared'),'button',true);
+  const actions=document.createElement('div');
+  actions.className='cache-actions';
+  actions.append(save,clear);
+  slider.oninput=paint;
+  body.append(description,stats,limitLabel,slider,actions,status);
+  if (!openToolPanel('settings',body,()=>{controller.abort();clearTimeout(timer);})) return;
+  paint();
+  async function refreshStats() {
+    if (!busy) {
+      const requested=revision;
+      try {
+        const data=await json('/api/cache',{signal:controller.signal});
+        if (!busy && requested===revision && !controller.signal.aborted) apply(data);
+      } catch(error) {
+        if (!snapshot && !controller.signal.aborted) status.textContent=errorOf(error);
+      }
+    }
+    if (!controller.signal.aborted) timer=setTimeout(refreshStats,1500);
+  }
+  refreshStats();
 }
 
 function openToolPanel(title,content,onClose=()=>{}) {

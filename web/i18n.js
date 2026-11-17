@@ -1,4 +1,7 @@
 const strings = {
+ cacheTotal:['缓存用量','Cache usage'], cacheThumbnails:['图片缩略图','Image thumbnails'], cacheVideos:['视频转码','Converted videos'],
+ cacheLimit:['最大缓存容量','Maximum cache size'], cacheSave:['保存容量','Save limit'], cacheSaved:['缓存容量已保存。','Cache limit saved.'],
+
  settings:['设置','Settings'], largeIcons:['大图标','Large icons'], parentFolder:['返回上一级','Parent folder'],
  selectMany:['多选','Select multiple'], selectItem:['选择「{name}」','Select “{name}”'], selectedItems:['已选 {count} 项','{count} selected'],
  deleteManyQuestion:['将 {count} 项移入回收站？','Move {count} items to the recycle bin?'],

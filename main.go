@@ -118,6 +118,13 @@ func run(ready, inheritedLock *os.File) error {
 	if command == "uninstall" && managedSystemd && !defaultSystemd {
 		return errors.New(cli("Uninstall the systemd installation using its default configuration.", "卸载 systemd 安装时请使用默认配置。"))
 	}
+	controlPath := filepath.Join(stateAbs, controlFileName)
+	reportStoppedSocket := false
+	if command == "uninstall" {
+		if info, err := os.Lstat(controlPath); err == nil {
+			reportStoppedSocket = info.Mode()&os.ModeSocket != 0
+		}
+	}
 	if stopping && defaultSystemd {
 		if err := systemctl("stop", systemdUnit); err != nil {
 			return err
@@ -216,6 +223,11 @@ func run(ready, inheritedLock *os.File) error {
 		if err := stopServer(stateDir); err != nil {
 			return err
 		}
+		if reportStoppedSocket {
+			if _, err := os.Lstat(controlPath); errors.Is(err, fs.ErrNotExist) {
+				reportUninstallRemoval(controlPath)
+			}
+		}
 		lock, err := lockServer(stateDir)
 		if err != nil {
 			return err
@@ -264,7 +276,7 @@ func run(ready, inheritedLock *os.File) error {
 		return err
 	}
 	videos := newVideoPreviews(videoTool, c.State)
-	defer videos.close()
+	defer videos.cache.clear()
 	protected := []string{c.State, executable}
 	if managedSystemd {
 		protected = append(protected, systemdUnitPath)

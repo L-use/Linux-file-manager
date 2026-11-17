@@ -10,10 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 const maxVideoPreview = 512 << 20
@@ -24,36 +21,18 @@ type videoPreviews struct {
 	executable string
 	state      string
 	converting chan struct{}
-	mu         sync.Mutex
-	files      map[videoKey]*os.File
-	order      []videoKey
+	cache      *previewCache
 }
 
 func newVideoPreviews(executable, state string) *videoPreviews {
-	return &videoPreviews{executable: executable, state: state, converting: make(chan struct{}, 1), files: make(map[videoKey]*os.File)}
-}
-
-func (v *videoPreviews) close() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	for _, file := range v.files {
-		file.Close()
-	}
-	clear(v.files)
-	v.order = nil
-}
-
-func (v *videoPreviews) cached(key videoKey) bool {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	return v.files[key] != nil
+	return &videoPreviews{executable: executable, state: state, converting: make(chan struct{}, 1), cache: newPreviewCache(state)}
 }
 
 func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.File) error {
 	if v.executable == "" {
 		return failure(503, "videoToolMissing")
 	}
-	if v.cached(key) {
+	if v.cache.hasVideo(key) {
 		return nil
 	}
 	select {
@@ -62,10 +41,12 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 	default:
 		return failure(503, "videoBusy")
 	}
-	if v.cached(key) {
+	if v.cache.hasVideo(key) {
 		return nil
 	}
 
+	budget, generation := v.cache.budget()
+	maxSize := min(budget, maxVideoPreview)
 	output, err := os.CreateTemp(v.state, ".fm-video-")
 	if err != nil {
 		return err
@@ -89,7 +70,7 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 		"-map", "0:V:0", "-map", "0:a:0?", "-map_metadata", "-1", "-map_chapters", "-1",
 		"-filter_threads", "2", "-vf", "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
 		"-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-threads", "2",
-		"-c:a", "aac", "-ac", "2", "-fs", strconv.Itoa(maxVideoPreview), "-fd", "4", "-f", "mp4", "fd:")
+		"-c:a", "aac", "-ac", "2", "-fs", strconv.FormatInt(maxSize, 10), "-fd", "4", "-f", "mp4", "fd:")
 	command.ExtraFiles = []*os.File{input, output}
 	if err := command.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
@@ -101,7 +82,7 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 	if err != nil {
 		return err
 	}
-	if info.Size() == 0 || info.Size() >= maxVideoPreview {
+	if info.Size() == 0 || info.Size() >= maxSize {
 		return failure(422, "videoLimit")
 	}
 	latest, err := descriptorStat(input)
@@ -112,36 +93,18 @@ func (v *videoPreviews) convert(ctx context.Context, key videoKey, input *os.Fil
 		return failure(409, "changed")
 	}
 
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	if len(v.order) == 2 {
-		old := v.order[0]
-		v.files[old].Close()
-		delete(v.files, old)
-		v.order = v.order[1:]
+	if !v.cache.put(previewCacheEntry{key: key, video: output, size: info.Size()}, generation) {
+		return failure(409, "videoNotReady")
 	}
-	v.files[key] = output
-	v.order = append(v.order, key)
 	keep = true
 	return nil
 }
 
 func (v *videoPreviews) serve(w http.ResponseWriter, r *http.Request, key videoKey, modified time.Time) error {
-	v.mu.Lock()
-	file := v.files[key]
-	var fd int
-	var err error
-	if file != nil {
-		fd, err = unix.FcntlInt(file.Fd(), unix.F_DUPFD_CLOEXEC, 0)
-	}
-	v.mu.Unlock()
-	if file == nil {
-		return failure(404, "videoNotReady")
-	}
+	preview, err := v.cache.openVideo(key)
 	if err != nil {
 		return err
 	}
-	preview := os.NewFile(uintptr(fd), "compatible.mp4")
 	defer preview.Close()
 	info, err := preview.Stat()
 	if err != nil {

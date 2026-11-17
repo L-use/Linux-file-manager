@@ -191,11 +191,28 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		}
 		return respond(w, value)
 	})
-	derivatives := newThumbnails()
+	derivatives := newThumbnails(videos.cache)
+	register("GET /api/cache", true, func(w http.ResponseWriter, r *http.Request) error {
+		return respond(w, videos.cache.stats())
+	})
+	register("PUT /api/cache", true, func(w http.ResponseWriter, r *http.Request) error {
+		var settings struct {
+			LimitMiB int `json:"limitMiB"`
+		}
+		if err := parseJSON(w, r, &settings); err != nil {
+			return err
+		}
+		if !validCacheLimit(settings.LimitMiB) {
+			return failure(400, "badRequest")
+		}
+		if err := videos.cache.setLimit(settings.LimitMiB); err != nil {
+			return err
+		}
+		return respond(w, videos.cache.stats())
+	})
 	register("POST /api/cache/clear", true, func(w http.ResponseWriter, r *http.Request) error {
-		derivatives.clear()
-		videos.close()
-		return respond(w, map[string]bool{"ok": true})
+		videos.cache.clear()
+		return respond(w, videos.cache.stats())
 	})
 	register("GET /api/thumbnail", true, func(w http.ResponseWriter, r *http.Request) error {
 		return derivatives.serve(s, w, r)

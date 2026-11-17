@@ -14,7 +14,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 )
 
 const minThumbnailSource = 1 << 20
@@ -29,27 +28,12 @@ type thumbnailKey struct {
 	edge          int
 }
 type thumbnails struct {
-	mu       sync.Mutex
-	results  map[thumbnailKey]thumbnail
-	order    []thumbnailKey
+	cache    *previewCache
 	decoding chan struct{}
 }
 
-func newThumbnails() *thumbnails {
-	return &thumbnails{results: make(map[thumbnailKey]thumbnail), decoding: make(chan struct{}, 1)}
-}
-
-func (t *thumbnails) clear() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	clear(t.results)
-	t.order = nil
-}
-
-func (t *thumbnails) get(key thumbnailKey) thumbnail {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.results[key]
+func newThumbnails(cache *previewCache) *thumbnails {
+	return &thumbnails{cache: cache, decoding: make(chan struct{}, 1)}
 }
 
 func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request) error {
@@ -69,7 +53,7 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 		return failure(415, "unsupported")
 	}
 	key := thumbnailKey{name, version(info), edge}
-	result := t.get(key)
+	result := t.cache.image(key)
 	if result.data == nil {
 		select {
 		case t.decoding <- struct{}{}:
@@ -87,8 +71,9 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 				return r.Context().Err()
 			}
 		}
-		result = t.get(key)
+		result = t.cache.image(key)
 		if result.data == nil {
+			_, generation := t.cache.budget()
 			result, err = makeThumbnail(r.Context(), f, ext == ".png", edge)
 			if err != nil {
 				return err
@@ -100,14 +85,7 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 			if !matches(current, key.version) {
 				return failure(409, "changed")
 			}
-			t.mu.Lock()
-			if len(t.order) == 12 {
-				delete(t.results, t.order[0])
-				t.order = t.order[1:]
-			}
-			t.results[key] = result
-			t.order = append(t.order, key)
-			t.mu.Unlock()
+			t.cache.put(previewCacheEntry{key: key, image: result, size: int64(len(result.data))}, generation)
 		}
 	}
 	w.Header().Set("Content-Type", result.contentType)

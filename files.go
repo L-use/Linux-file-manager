@@ -539,9 +539,17 @@ func (s *fileStore) checkRecursiveDelete(parent *os.File, name string, expected 
 }
 
 func (s *fileStore) unlink(parent *os.File, name string, info fs.FileInfo) error {
+	return s.unlinkReported(parent, name, info, "", nil)
+}
+
+func (s *fileStore) unlinkReported(parent *os.File, name string, info fs.FileInfo, location string, report func(string)) error {
 	fd := int(parent.Fd())
 	if !info.IsDir() {
-		return unix.Unlinkat(fd, name, 0)
+		err := unix.Unlinkat(fd, name, 0)
+		if err == nil && report != nil {
+			report(location)
+		}
+		return err
 	}
 	dir, err := openAt(parent, name, unix.O_RDONLY|unix.O_DIRECTORY, 0)
 	if err != nil {
@@ -573,7 +581,7 @@ func (s *fileStore) unlink(parent *os.File, name string, info fs.FileInfo) error
 		if err != nil {
 			return err
 		}
-		if err := s.unlink(dir, item, child); err != nil {
+		if err := s.unlinkReported(dir, item, child, filepath.Join(location, item), report); err != nil {
 			return err
 		}
 	}
@@ -584,7 +592,11 @@ func (s *fileStore) unlink(parent *os.File, name string, info fs.FileInfo) error
 	if !sameFile(info, current) {
 		return failure(409, "changed")
 	}
-	return unix.Unlinkat(fd, name, unix.AT_REMOVEDIR)
+	err = unix.Unlinkat(fd, name, unix.AT_REMOVEDIR)
+	if err == nil && report != nil {
+		report(location)
+	}
+	return err
 }
 
 func version(info fs.FileInfo) string {

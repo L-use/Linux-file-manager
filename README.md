@@ -48,7 +48,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 | `2` | 停止服务 |
 | `3` | 修改管理员密码。请先停止服务。 |
 | `4` | 切换终端菜单语言 |
-| `5` | 彻底卸载。确认后停止服务，清理程序、配置、密码记录、日志和回收站。受管理的文件保留。 |
+| `5` | 彻底卸载。确认后停止服务，清理程序、配置、密码记录、预览缓存和回收站，注销安装器创建的 systemd 服务。受管理的文件保留。 |
 | `0` | 退出菜单 |
 
 ### 首次启动与登录
@@ -59,7 +59,7 @@ curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/
 
 程序会在后台运行。systemd 安装用 `journalctl -u filemanager.service` 查看日志，独立后台运行的日志在 `state/filemanager.log`。程序会自动读取可执行文件旁的 `config.json`，配置中的相对路径以配置文件所在目录为准。发布版需要 Linux 的标准 `/proc` 挂载。
 
-卸载成功后会显示「卸载完成」。如果安装目录或自定义状态目录里还有其他文件，卸载会保留这些文件及其目录。
+卸载时会逐条列出已删除的文件、链接和目录，结束后显示「卸载完成」。如果安装目录或自定义状态目录里还有其他文件，卸载会保留这些文件及其目录。操作系统的共享 systemd 日志按系统的日志策略保留。
 
 ```json
 {

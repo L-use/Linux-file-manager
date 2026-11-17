@@ -14,6 +14,37 @@ import (
 
 const portableMarker = "filemanager.portable"
 
+func reportUninstallRemoval(name string) {
+	fmt.Printf(cli("  Removed %q\n", "  已删除 %q\n"), name)
+}
+
+func reportUninstallResult(name string, err error) error {
+	if err == nil {
+		reportUninstallRemoval(name)
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return err
+}
+
+func removeUninstallTree(parent *os.File, name string) error {
+	store := &fileStore{}
+	info, err := store.metadata(parent, name)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		if err := store.checkRecursiveDelete(parent, name, info); err != nil {
+			return err
+		}
+	}
+	return store.unlinkReported(parent, name, info, filepath.Join(parent.Name(), name), reportUninstallRemoval)
+}
+
 func removeUninstallFile(name string) error {
 	info, err := os.Lstat(name)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -25,31 +56,20 @@ func removeUninstallFile(name string) error {
 	if info.IsDir() {
 		return fmt.Errorf("expected a file at %s", name)
 	}
-	return os.Remove(name)
+	return reportUninstallResult(name, os.Remove(name))
 }
 
 func removeEmptyDirectory(name string) error {
 	err := unix.Rmdir(name)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, unix.ENOTEMPTY) ||
-		errors.Is(err, unix.EEXIST) || errors.Is(err, unix.EBUSY) {
+		errors.Is(err, unix.EEXIST) {
 		return nil
 	}
-	return err
+	return reportUninstallResult(name, err)
 }
 
 func deleteProgramState(state *os.File) error {
-	store := &fileStore{}
-	info, err := store.metadata(state, "trash")
-	if err == nil {
-		if info.IsDir() {
-			if err := store.checkRecursiveDelete(state, "trash", info); err != nil {
-				return err
-			}
-		}
-		if err := store.unlink(state, "trash", info); err != nil {
-			return err
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	if err := removeUninstallTree(state, "trash"); err != nil {
 		return err
 	}
 
@@ -64,10 +84,10 @@ func deleteProgramState(state *os.File) error {
 	}
 	for _, name := range names {
 		if name != "credentials.json" && name != logFileName && name != controlFileName &&
-			!strings.HasPrefix(name, ".credential-") && !strings.HasPrefix(name, ".fm-video-") {
+			name != previewCacheLimitFile && !uninstallTemporary(name, ".credential-", ".fm-video-", ".preview-cache-limit-") {
 			continue
 		}
-		if err := unix.Unlinkat(int(state.Fd()), name, 0); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := reportUninstallResult(filepath.Join(state.Name(), name), unix.Unlinkat(int(state.Fd()), name, 0)); err != nil {
 			return err
 		}
 	}
@@ -96,7 +116,7 @@ func removePortableArtifacts(appDir string) error {
 			}
 			err = unix.Unlinkat(int(dir.Fd()), leaf, 0)
 			dir.Close()
-			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := reportUninstallResult(filepath.Join(appDir, path), err); err != nil {
 				return err
 			}
 		}
@@ -113,7 +133,9 @@ func removePortableArtifacts(appDir string) error {
 				}
 				err = unix.Unlinkat(int(parent.Fd()), child, unix.AT_REMOVEDIR)
 				parent.Close()
-				if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, unix.ENOTDIR) &&
+				if err == nil {
+					reportUninstallRemoval(filepath.Join(appDir, dir))
+				} else if !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, unix.ENOTDIR) &&
 					!errors.Is(err, unix.ENOTEMPTY) && !errors.Is(err, unix.EEXIST) && !errors.Is(err, unix.EBUSY) {
 					return err
 				}
@@ -123,12 +145,32 @@ func removePortableArtifacts(appDir string) error {
 	return nil
 }
 
+func uninstallTemporary(name string, prefixes ...string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
 func uninstallProgram(executable, configName string, state *os.File) error {
 	name := filepath.Base(executable)
 	if name != "filemanager" && name != "file-manager" {
 		return errors.New(cli("Uninstall requires the original executable name.", "卸载时需要使用程序原始文件名。"))
 	}
 	appDir := filepath.Dir(executable)
+	entries, err := os.ReadDir(appDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && uninstallTemporary(entry.Name(), ".filemanager-language-", ".filemanager.", ".config.", ".install-setting.") {
+			if err := removeUninstallFile(filepath.Join(appDir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
 	if state != nil {
 		if err := deleteProgramState(state); err != nil {
 			return fmt.Errorf(cli("remove program state: %w", "清理程序状态失败：%w"), err)
@@ -136,11 +178,6 @@ func uninstallProgram(executable, configName string, state *os.File) error {
 	}
 	if err := removePortableArtifacts(appDir); err != nil {
 		return err
-	}
-	if configName != "" {
-		if err := removeUninstallFile(configName); err != nil {
-			return err
-		}
 	}
 	aliases := []string{filepath.Join(appDir, "filemanager"), filepath.Join(appDir, "file-manager")}
 	if raw, err := os.ReadFile(filepath.Join(appDir, registeredCommandFile)); err == nil {
@@ -164,19 +201,36 @@ func uninstallProgram(executable, configName string, state *os.File) error {
 			return err
 		}
 	}
-	if err := os.Remove(executable); err != nil {
-		return err
-	}
 	if state != nil {
-		if err := unix.Unlinkat(int(state.Fd()), lockFileName, 0); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := reportUninstallResult(filepath.Join(state.Name(), lockFileName), unix.Unlinkat(int(state.Fd()), lockFileName, 0)); err != nil {
 			return err
 		}
 		if err := removeEmptyDirectory(state.Name()); err != nil {
 			return err
 		}
+		if _, err := os.Lstat(state.Name()); err == nil {
+			fmt.Printf(cli("  Kept nonempty directory: %q\n", "  保留非空目录 %q\n"), state.Name())
+		} else if errors.Is(err, fs.ErrNotExist) {
+			for dir := filepath.Dir(state.Name()); dir != appDir && inside(appDir, dir); dir = filepath.Dir(dir) {
+				if err := removeEmptyDirectory(dir); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if configName != "" {
+		if err := removeUninstallFile(configName); err != nil {
+			return err
+		}
+	}
+	if err := removeUninstallFile(executable); err != nil {
+		return err
 	}
 	if err := removeEmptyDirectory(appDir); err != nil {
 		return err
+	}
+	if _, err := os.Lstat(appDir); err == nil {
+		fmt.Printf(cli("  Kept directory containing other files: %q\n", "  保留包含其他文件的目录 %q\n"), appDir)
 	}
 	fmt.Println(cli("Uninstallation complete.", "卸载完成。"))
 	return nil
@@ -207,5 +261,5 @@ func removeCommandAlias(alias, executable string) error {
 	if filepath.Clean(target) != executable {
 		return nil
 	}
-	return os.Remove(alias)
+	return reportUninstallResult(alias, os.Remove(alias))
 }
