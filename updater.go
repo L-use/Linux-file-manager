@@ -46,6 +46,35 @@ type releaseUpdate struct {
 	InstallationExact bool   `json:"installationExact"`
 }
 
+type githubRelease struct {
+	Tag        string `json:"tag_name"`
+	Draft      bool   `json:"draft"`
+	Prerelease bool   `json:"prerelease"`
+	Assets     []struct {
+		Name  string `json:"name"`
+		State string `json:"state"`
+	} `json:"assets"`
+}
+
+type releaseVersions struct {
+	Versions []string `json:"versions"`
+	NextPage int      `json:"nextPage,omitempty"`
+}
+
+func (r githubRelease) installable() bool {
+	if r.Draft || r.Prerelease || !releaseTag.MatchString(r.Tag) {
+		return false
+	}
+	var archive, checksum bool
+	for _, asset := range r.Assets {
+		if asset.State == "uploaded" {
+			archive = archive || asset.Name == "file-manager-linux-"+runtime.GOARCH+".tar.gz"
+			checksum = checksum || asset.Name == "SHA256SUMS"
+		}
+	}
+	return archive && checksum
+}
+
 type releaseUpdater struct {
 	client            *http.Client
 	executable        string
@@ -120,6 +149,9 @@ func (u *releaseUpdater) setMode(mode string) error {
 	}
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	if u.installing {
+		return failure(409, "busy")
+	}
 	if err := writePrivateSetting(filepath.Join(u.state, updateModeFile), []byte(mode+"\n"), 0600); err != nil {
 		return err
 	}
@@ -204,6 +236,48 @@ func (u *releaseUpdater) check(ctx context.Context) (releaseUpdate, error) {
 	return u.status(), nil
 }
 
+func (u *releaseUpdater) releaseMetadata(ctx context.Context, suffix string, result any) error {
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	resp, err := u.request(ctx, "https://api.github.com/repos/"+releaseRepository+"/releases"+suffix)
+	if err != nil {
+		log.Printf("Read releases: %v", err)
+		return failure(502, "updateCheckError")
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(result); err != nil {
+		return failure(502, "updateCheckError")
+	}
+	return nil
+}
+
+func (u *releaseUpdater) versions(ctx context.Context, page int) (releaseVersions, error) {
+	const pageSize = 30
+	var releases []githubRelease
+	if err := u.releaseMetadata(ctx, fmt.Sprintf("?per_page=%d&page=%d", pageSize, page), &releases); err != nil {
+		return releaseVersions{}, err
+	}
+	result := releaseVersions{Versions: make([]string, 0, len(releases))}
+	for _, release := range releases {
+		if release.installable() {
+			result.Versions = append(result.Versions, release.Tag)
+		}
+	}
+	slices.SortFunc(result.Versions, func(a, b string) int {
+		if newerRelease(a, b) {
+			return -1
+		}
+		if newerRelease(b, a) {
+			return 1
+		}
+		return 0
+	})
+	if len(releases) == pageSize {
+		result.NextPage = page + 1
+	}
+	return result, nil
+}
+
 func (u *releaseUpdater) poll(ctx context.Context) {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -241,12 +315,31 @@ func (u *releaseUpdater) install(ctx context.Context, tag string, automatic bool
 	if !supportedUpdate() {
 		return failure(409, "updateUnsupported")
 	}
-	status, err := u.check(ctx)
-	if err != nil {
-		return err
-	}
-	if !status.Available || status.Latest != tag {
+	if tag == buildVersion || !releaseTag.MatchString(tag) {
 		return failure(409, "updateUnavailable")
+	}
+	latest := ""
+	if automatic {
+		status, err := u.check(ctx)
+		if err != nil {
+			return err
+		}
+		if !status.Available || status.Latest != tag {
+			return failure(409, "updateUnavailable")
+		}
+	} else {
+		var release githubRelease
+		if err := u.releaseMetadata(ctx, "/tags/"+tag, &release); err != nil {
+			return err
+		}
+		if release.Tag != tag || !release.installable() {
+			return failure(409, "updateUnavailable")
+		}
+		if u.status().Mode == "auto" {
+			if status, err := u.check(ctx); err == nil {
+				latest = status.Latest
+			}
+		}
 	}
 	u.mu.Lock()
 	if u.installing {
@@ -274,6 +367,13 @@ func (u *releaseUpdater) install(ctx context.Context, tag string, automatic bool
 	if ctx.Err() != nil || (automatic && u.mode != "auto") {
 		os.Remove(path)
 		return failure(409, "updateUnavailable")
+	}
+	if !automatic && u.mode == "auto" && (tag != latest || newerRelease(buildVersion, tag)) {
+		if err := writePrivateSetting(filepath.Join(u.state, updateModeFile), []byte("manual\n"), 0600); err != nil {
+			os.Remove(path)
+			return err
+		}
+		u.mode = "manual"
 	}
 	u.ready <- path
 	prepared = true

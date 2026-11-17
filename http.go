@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -176,12 +177,34 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		}
 		return respond(w, updates.status())
 	})
+	register("GET /api/updates/versions", true, func(w http.ResponseWriter, r *http.Request) error {
+		page := 1
+		if value := r.URL.Query().Get("page"); value != "" {
+			var err error
+			page, err = strconv.Atoi(value)
+			if err != nil || page < 1 || page > 1000 {
+				return failure(400, "badRequest")
+			}
+		}
+		result, err := updates.versions(r.Context(), page)
+		if err != nil {
+			return err
+		}
+		return respond(w, result)
+	})
 	register("POST /api/updates/install", true, func(w http.ResponseWriter, r *http.Request) error {
-		var input releaseUpdate
+		var input struct {
+			Version string `json:"version"`
+			Latest  string `json:"latest"`
+		}
 		if err := parseJSON(w, r, &input); err != nil {
 			return err
 		}
-		if err := updates.install(r.Context(), input.Latest, false); err != nil {
+		tag := input.Version
+		if tag == "" {
+			tag = input.Latest
+		}
+		if err := updates.install(r.Context(), tag, false); err != nil {
 			return err
 		}
 		return respond(w, map[string]bool{"ok": true})

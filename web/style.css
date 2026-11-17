@@ -436,3 +436,7 @@ a.button:visited{color:inherit}
 .root-check-error{color:#c64747}
 [data-theme="night"] .root-check-success{color:#65c891}
 [data-theme="night"] .root-check-error{color:#ff8c8b}
+
+.update-version-field{display:grid;gap:6px;width:100%}
+.update-version-field label{font-weight:650}
+.update-version-field select{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:6px;background-color:Canvas;color:CanvasText}

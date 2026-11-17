@@ -1336,7 +1336,16 @@ function openUpdates() {
   const legend=document.createElement('legend');
   legend.dataset.i18n='updateMode';
   modes.append(legend);
-  let state;
+  const versionField=document.createElement('div');
+  versionField.className='update-version-field';
+  const label=document.createElement('label'), choices=document.createElement('select');
+  label.htmlFor=choices.id='update-target-version';
+  label.dataset.i18n='updateChooseVersion';
+  versionField.append(label,choices);
+  const versionsHint=document.createElement('p');
+  versionsHint.dataset.i18n='updateVersionHint';
+  let state, nextPage=1, loadingVersions=false, installing=false;
+  const releases=new Set();
   const radios={};
   function paint(data) {
     state=data;
@@ -1353,8 +1362,41 @@ function openUpdates() {
     modes.disabled=false;
     radios[data.mode].checked=true;
     radios.auto.disabled=!data.supported;
-    install.hidden=!data.available || !data.supported;
+    paintVersions();
     paintUpdateNotice(data);
+  }
+  function paintVersions() {
+    const selected=choices.value;
+    const placeholder=document.createElement('option');
+    placeholder.value='';
+    placeholder.textContent=t('updateChooseVersion');
+    const available=new Set(releases);
+    choices.replaceChildren(placeholder);
+    for (const version of [...available].sort((a,b)=>b.localeCompare(a,undefined,{numeric:true}))) {
+      const option=document.createElement('option');
+      option.value=version;
+      option.disabled=version===state?.current;
+      option.textContent=option.disabled?t('updateInstalledOption',{version}):version;
+      choices.append(option);
+    }
+    if (available.has(selected) && selected!==state?.current) choices.value=selected;
+    else if (state?.available && available.has(state.latest)) choices.value=state.latest;
+    choices.disabled=installing || !state?.supported || ![...choices.options].some(option=>option.value && !option.disabled);
+    install.disabled=choices.disabled || !choices.value;
+    moreVersions.hidden=!nextPage;
+    moreVersions.disabled=loadingVersions || installing;
+  }
+  async function loadVersions() {
+    if (!nextPage || loadingVersions) return;
+    loadingVersions=true;
+    paintVersions();
+    try {
+      const data=await json('/api/updates/versions?page='+nextPage,{signal:controller.signal});
+      for (const tag of data.versions) releases.add(tag);
+      nextPage=data.nextPage || 0;
+    } catch(error) {
+      if (!controller.signal.aborted) feedback.textContent=errorOf(error);
+    } finally {loadingVersions=false;paintVersions();}
   }
   async function changeMode(mode) {
     modes.disabled=true;
@@ -1382,22 +1424,29 @@ function openUpdates() {
     finally {check.disabled=false;}
   },'button',true);
   const install=makeButton('updateInstall','download',async()=>{
-    if (!window.confirm(t('updateRestart',{version:state.latest}))) return;
-    install.disabled=true;
+    const version=choices.value;
+    if (!version || installing) return;
+    const older=version.localeCompare(state.current,undefined,{numeric:true})<0;
+    if (!await reviewEdits() || !window.confirm(t(older?'updateRollbackConfirm':'updateRestart',{version}))) return;
+    installing=true;
+    paintVersions();
     feedback.textContent=t('updating');
     try {
-      await json('/api/updates/install',{method:'POST',body:{latest:state.latest}});
+      await json('/api/updates/install',{method:'POST',body:{version}});
       feedback.textContent=t('updateRestarting');
-      await waitForRestart(feedback,state.latest);
+      await waitForRestart(feedback,version);
     } catch(error) {feedback.textContent=errorOf(error);}
-    finally {install.disabled=false;}
+    finally {installing=false;paintVersions();}
   },'button',true);
-  install.hidden=true;
+  const moreVersions=makeButton('updateMoreVersions','down',loadVersions,'button',true);
+  choices.onchange=()=>{install.disabled=!choices.value || installing;};
   const actions=document.createElement('div');
   actions.className='cache-actions';
-  actions.append(check,install);
-  body.append(details,actions,feedback,modes,hint);
+  actions.append(check,install,moreVersions);
+  body.append(details,versionField,actions,feedback,versionsHint,modes,hint);
   if (!openToolPanel('checkUpdates',body,()=>controller.abort())) return;
+  paintVersions();
+  loadVersions();
   json('/api/updates',{signal:controller.signal}).then(paint).catch(error=>{
     if (!controller.signal.aborted) feedback.textContent=errorOf(error);
   });
