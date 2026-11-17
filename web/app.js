@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {progressPercent,startProgress,withProgress} from './progress.js';
+import {completeReady,progressPercent,replaceReady,setProgress,startProgress,withProgress} from './progress.js';
 import {language, setLanguage, t, translate} from './i18n.js';
 import {mountPreview, fileType, formatCategory, mountGridThumbnails} from './preview.js';
 import {createServerStatus} from './server-status.js';
@@ -28,6 +28,8 @@ let root = '', selected = '', current = null, activePreview = null, previewId = 
 let sessionUser='', loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
 let gridPath=null, selecting=false, bulkBusy=false, gridPreview;
 const gridThumbnails=new Map();
+const gridScrollPositions=new Map();
+let returnTile=null;
 const marked=new Map();
 const originalImages=new Map();
 const originalImageLimit=128*1024*1024;
@@ -85,7 +87,7 @@ async function api(route, options = {}) {
 }
 async function json(route, options) { return (await api(route,options)).json(); }
 const action = (body) => json('/api/action',{method:'POST',body});
-async function streamedOperation(route,body,progress,unit='percent') {
+async function streamedOperation(route,body,progress) {
   const response=await api(route,{method:'POST',body,headers:{Accept:'application/x-ndjson'}});
   if (!response.body || !response.headers.get('Content-Type')?.startsWith('application/x-ndjson')) return response.json();
   const reader=response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -101,7 +103,16 @@ async function streamedOperation(route,body,progress,unit='percent') {
         buffer=buffer.slice(end+1);
         if (event.error) throw event;
         if (Object.hasOwn(event,'result')) return event.result;
-        if (event.stage) progress.update(event.stage,event.done,event.total,unit);
+        if (event.stage) {
+          const fraction=event.total>0?Math.min(1,event.done/event.total):0;
+          if (route==='/api/action') {
+            progress.update(event.stage,event.stage==='zipFinishing'?1:fraction,3);
+          } else if (route==='/api/updates/install') {
+            progress.update(event.stage,event.stage==='updateVerifying'?1:fraction,3);
+          } else {
+            progress.update(event.stage,fraction,2);
+          }
+        }
       }
     }
     throw {error:'network'};
@@ -113,7 +124,11 @@ function taskProgress(label) {
   const progress=startProgress(box,label);
   box.translateMessage=()=>translate(box);
   $('toasts').append(box);
-  return {...progress,finish:()=>box.remove()};
+  return {...progress,finish:()=>{
+    progress.finish();
+    if (!progress.element.isConnected) box.remove();
+    else setTimeout(()=>box.remove(),180);
+  }};
 }
 const liveStatus=createServerStatus(json,size);
 function bytesPercent(bytes,total,complete=false) {
@@ -310,6 +325,8 @@ function showLogin(error='') {
   formatFilter.hidden=true;
   formatFilter.value='';
   gridPath=null;
+  returnTile=null;
+  gridScrollPositions.clear();
   gridPreview?.abort();
   gridThumbnails.clear();
   clearOriginalImages();
@@ -363,7 +380,8 @@ async function showWorkspace(session) {
   $('toggle-tree').disabled=false;
   sessionUser=session.user;
   if ($('tools-dialog').open) $('tools-dialog').close();
-  setEmpty('emptyTitle','emptyHint');
+  gridPath='';
+  selected='';
   renderHeader();
   liveStatus.start();
   renderTree();
@@ -376,7 +394,11 @@ async function loadDirectory(path) {
   directoryErrors.delete(path);
   try {
     const list=await json(query('list',path));
-    if (session===generation) cache.set(path,list);
+    if (session===generation) {
+      cache.set(path,list);
+      const loading=tree.querySelector(`[data-pending-directory="${CSS.escape(path)}"]`);
+      if (completeReady(loading)) await new Promise(resolve=>setTimeout(resolve,180));
+    }
   } catch(error) {
     if (session===generation) {
       directoryErrors.set(path,error?.error || 'network');
@@ -482,7 +504,11 @@ function renderTree(focusPath) {
     if (!isDir || !open) return;
     const children=cache.get(entry.path)?.filter(child=>isVisiblePath(child.path));
     if (directoryErrors.has(entry.path)) fragment.append(directoryNote(directoryErrors.get(entry.path),depth+1));
-    else if (!children) fragment.append(directoryNote('loading',depth+1));
+    else if (!children) {
+      const loading=directoryNote('loading',depth+1);
+      loading.dataset.pendingDirectory=entry.path;
+      fragment.append(loading);
+    }
     else {
       const matching=children.filter(matches);
       if (!matching.length && !filter) fragment.append(directoryNote(children.length?'noMatches':'emptyFolder',depth+1));
@@ -523,8 +549,7 @@ function updateBulkActions() {
   $('select-many').setAttribute('aria-pressed',String(selecting));
 }
 function updateGridButton() {
-  const button=$('open-grid');
-  button.setAttribute('aria-pressed',String(gridPath!==null));
+  $('open-grid').hidden=!current;
 }
 function gridDragSelection(grid, tiles) {
   let drag;
@@ -579,13 +604,19 @@ function gridDragSelection(grid, tiles) {
   grid.onpointerleave=()=>{if (!drag?.initial) drag=null;};
 }
 
+function rememberGridScroll() {
+  const grid=$('preview-host').querySelector('.file-grid');
+  if (grid) gridScrollPositions.set(grid.dataset.path,grid.scrollTop);
+}
+
 function renderGrid() {
   if (gridPath===null || current) return;
   updateGridButton();
   gridPreview?.abort();
   gridPreview=new AbortController();
   const host=$('preview-host');
-  const prior=host.querySelector('.file-grid')?.scrollTop || 0;
+  rememberGridScroll();
+  const prior=gridScrollPositions.get(gridPath) || 0;
   const entries=cache.get(gridPath);
   const error=directoryErrors.get(gridPath);
   if (!entries || error) {setEmpty(error||'loading','',null,!error);return;}
@@ -598,6 +629,7 @@ function renderGrid() {
   if (gridPath) headline.prepend(makeButton('parentFolder','chevron',()=>openGrid(parent(gridPath))));
   const grid=document.createElement('div');
   grid.className='file-grid';
+  grid.dataset.path=gridPath;
   const tiles=new Map(), previews=[];
   const filter=search.value.trim().toLocaleLowerCase();
   for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && matchesFormat(item) && item.name.toLocaleLowerCase().includes(filter)))) {
@@ -608,6 +640,7 @@ function renderGrid() {
     button.type='button';
     button.className='tile-open';
     button.title=entry.name;
+    button.dataset.path=entry.path;
     const preview=document.createElement('span');
     preview.className='tile-preview type-'+type.style;
     preview.innerHTML=icon(type.icon);
@@ -616,7 +649,7 @@ function renderGrid() {
     name.className='truncate';
     name.textContent=entry.name;
     button.append(preview,name);
-    button.onclick=()=>entry.kind==='directory'?openGrid(entry.path):showFile(entry);
+    button.onclick=()=>entry.kind==='directory'?openGrid(entry.path):showFile(entry,{fromGrid:true});
     tile.append(button,makeButton('more','more',event=>itemMenu(entry,event.currentTarget),'icon-button tile-more'));
     if (selecting) tile.append(selectionCheckbox(entry));
     tile.oncontextmenu=event=>{event.preventDefault();itemMenu(entry,button,{x:event.clientX,y:event.clientY});};
@@ -625,37 +658,39 @@ function renderGrid() {
   }
   if (!grid.children.length) grid.append(directoryNote(filter || formatFilter.value?'noMatches':'emptyFolder',0));
   else gridDragSelection(grid,tiles);
-  host.replaceChildren(headline,grid);
+  replaceReady(host,headline,grid);
   grid.scrollTop=prior;
   mountGridThumbnails(grid,previews,gridPreview.signal,query,fileURL,gridThumbnails);
   translate(host);
 }
 async function openGrid(path=targetDirectory()) {
   if (current && !await reviewEdits()) return;
-  if (current) closePreview(true);
+  clearPreview();
+  returnTile=null;
+  await browseGrid(path);
+}
+async function browseGrid(path) {
   gridPath=path;
   selected=path;
+  expanded.add(path);
   closeMenu(false);
   setDrawer(false);
+  renderHeader();
   renderTree();
   if (!cache.has(path) || directoryErrors.has(path)) {
     await loadDirectory(path);
-    if (gridPath===path) renderGrid();
+    if (gridPath===path && !current) renderTree();
   }
 }
 async function toggleDirectory(entry) {
   const path=entry.path;
-  if (gridPath!==null) {await openGrid(path);return;}
-  selected=path;
-  if (expanded.has(path) && !directoryErrors.has(path)) {
-    expanded.delete(path);
-    renderTree(path);
-  } else {
-    expanded.add(path);
-    const need=!cache.has(path);
-    renderTree(path);
-    if (need) {await loadDirectory(path);renderTree();}
+  if (current || gridPath!==path || directoryErrors.has(path)) {
+    await openGrid(path);
+    return;
   }
+  if (expanded.has(path)) expanded.delete(path);
+  else expanded.add(path);
+  renderTree(path);
 }
 async function locate(path) {
   if (!isVisiblePath(path)) revealHidden(true);
@@ -666,18 +701,20 @@ async function locate(path) {
   const missing=prefixes.filter(prefix=>!cache.has(prefix));
   const progress=missing.length?taskProgress('locatingFolder'):null;
   let loaded=0;
-  progress?.update('locatingFolder',0,missing.length,'count');
+  progress?.update('locatingFolder',0,missing.length);
   try {
     for (const prefix of prefixes) {
       expanded.add(prefix);
       if (missing.includes(prefix)) {
         await loadDirectory(prefix);
-        progress?.update('locatingFolder',++loaded,missing.length,'count');
+        progress?.update('locatingFolder',++loaded,missing.length);
       }
     }
+    if (!current) gridPath=path;
     selected=path;
     renderTree(path);
     document.activeElement.closest('.tree-row')?.scrollIntoView({block:'nearest'});
+    progress?.complete();
   } finally {progress?.finish();}
 }
 function targetDirectory() {
@@ -689,11 +726,11 @@ async function refresh(notify=false) {
   if (!newest.includes('')) newest.unshift('');
   const progress=notify?taskProgress('refreshing'):null;
   const total=newest.length+1;
-  progress?.update('refreshing',0,total,'count');
+  progress?.update('refreshing',0,total);
   try {
     for (const [index,path] of newest.entries()) {
       await loadDirectory(path);
-      progress?.update('refreshing',index+1,total,'count');
+      progress?.update('refreshing',index+1,total);
       if (path && directoryErrors.get(path)==='missing') {
         expanded.delete(path);
         directoryErrors.delete(path);
@@ -721,15 +758,16 @@ async function refresh(notify=false) {
         if (current===requested && unsaved()) tell(error);
         else if (current===requested) {
           closePreview();
-          if (selected===requested.path) selected=parent(requested.path);
-          setEmpty(error.error || 'readError');
           tell(error);
         }
       }
     }
-    while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
+    if (!current && gridPath!==null) {
+      while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
+      selected=gridPath;
+    }
     renderTree();
-    progress?.update('refreshing',total,total,'count');
+    if (!directoryErrors.has('')) progress?.complete();
     if (notify) {
       if (directoryErrors.has('')) tell({error:directoryErrors.get('')});
       else toast('refreshed');
@@ -777,6 +815,7 @@ function renderHeader() {
   tab.replaceChildren();
   trail.replaceChildren();
   $('file-actions').hidden=!current;
+  updateGridButton();
   $('preview-fullscreen').hidden=current?.kind!=='file';
   renderFullscreenButton();
   const n=document.createElement('span');
@@ -795,7 +834,7 @@ function renderHeader() {
     $('download').download=current.name;
     $('file-size').textContent=current.kind==='file'?size(current.size):'';
   } else {
-    n.dataset.i18n='preview';
+    n.dataset.i18n='largeIcons';
     tab.append(n);
   }
   const rootButton=document.createElement('button');
@@ -829,21 +868,32 @@ function renderHeader() {
 function updateStatus(detail='') {
   $('status-details').textContent=[detail,current?.kind==='file'?size(current.size):''].filter(Boolean).join('  ·  ');
 }
-async function closePreview(discardApproved=false) {
-  if (!discardApproved && unsaved() && !await reviewEdits()) return;
+function clearPreview() {
+  if (!current) return;
   leavePreviewFullscreen();
   previewId++;
   activePreview?.destroy();
   activePreview=null;
   current=null;
-  setEmpty('emptyTitle','emptyHint');
-  renderHeader();
+}
+async function closePreview(discardApproved=false) {
+  if (!current || (!discardApproved && unsaved() && !await reviewEdits())) return;
+  const tile=returnTile;
+  returnTile=null;
+  const documentPath=current.path;
+  clearPreview();
+  await browseGrid(gridPath ?? parent(documentPath));
+  if (!current && tile) {
+    $('preview-host').querySelector(`.tile-open[data-path="${CSS.escape(tile)}"]`)?.focus({preventScroll:true});
+  }
 }
 async function showFile(entry, options={}) {
   if (!options.discardApproved && unsaved() && !await reviewEdits()) return;
-  gridPath=null;
+  if (!current) {
+    rememberGridScroll();
+    returnTile=options.fromGrid?entry.path:null;
+  }
   gridPreview?.abort();
-  updateGridButton();
   const id=++previewId;
   activePreview?.destroy();
   current=entry;
@@ -1231,17 +1281,20 @@ function promptDialog(opts) {
 
 async function fileOperation(label,task) {
   const progress=taskProgress(label);
-  progress.update(label,0,2,'count');
+  progress.update(label,0,2);
   try {
-    const result=await task(()=>progress.update('refreshing',1,2,'count'));
-    progress.update(label,2,2,'count');
+    const result=await task(()=>progress.update('refreshing',1,2));
+    progress.complete();
     return result;
   } finally {progress.finish();}
 }
 async function fetchEntryWithProgress(path) {
   const progress=taskProgress('loading');
-  try {return await json(query('stat',path));}
-  finally {progress.finish();}
+  try {
+    const entry=await json(query('stat',path));
+    progress.complete();
+    return entry;
+  } finally {progress.finish();}
 }
 
 async function changePermissions(entry) {
@@ -1297,9 +1350,10 @@ async function extractZip(entry) {
   const progress=taskProgress('zipExtractingProgress');
   try {
     await streamedOperation('/api/action',{action:'extractZip',path:entry.path,destination:folder,version:entry.version},progress);
-    progress.update('refreshing');
+    progress.update('refreshing',2,3);
     expanded.add(parent(entry.path));
     await refresh();
+    progress.complete();
     toast('zipExtracted',{name:folder});
   } catch (error) {tell(error);}
   finally {progress.finish();}
@@ -1318,14 +1372,14 @@ async function changePath(entry,moving) {
   const body={action:'move',path:original,destination,version:entry.version};
   const label=moving?'movingItem':'renamingItem';
   const progress=taskProgress(label);
-  progress.update(label,0,2,'count');
+  progress.update(label,0,2);
   try {
     try {await action(body);} catch(error) {
       if (!moving || error.error!=='conflict' || !error.replaceable || entry.kind!=='file') throw error;
       if (!await promptDialog({title:'replacePrompt',values:{name:entry.name},submit:'replace',danger:true})) return;
       await action({...body,overwrite:error.version});
     }
-    progress.update('refreshing',1,2,'count');
+    progress.update('refreshing',1,2);
     moveHiddenPaths(original,destination);
     const related=(path)=>path===original||path.startsWith(original+'/');
     const updated=(path)=>destination+path.slice(original.length);
@@ -1333,11 +1387,20 @@ async function changePath(entry,moving) {
       if (related(path)) {expanded.delete(path);expanded.add(updated(path));}
     }
     expanded.add(parent(destination));
+    if (gridPath!==null && related(gridPath)) {
+      const oldGridPath=gridPath;
+      gridPath=updated(gridPath);
+      const scroll=gridScrollPositions.get(oldGridPath);
+      if (scroll!==undefined) gridScrollPositions.set(gridPath,scroll);
+      gridScrollPositions.delete(oldGridPath);
+    }
+    if (returnTile && related(returnTile)) returnTile=updated(returnTile);
     if (related(selected)) selected=updated(selected);
     if (current && related(current.path)) {
       await showFile({...current,path:updated(current.path),name:current.path===original?(moving?entry.name:value):current.name},{focus:false,closeDrawer:false,changeTarget:false,discardApproved:true});
     }
     await refresh();
+    progress.complete();
     toast('operationDone');
   } catch(e) {tell(e);}
   finally {progress.finish();}
@@ -1353,8 +1416,9 @@ async function deleteEntry(entry) {
     const item=await fileOperation('deletingFiles',async refreshing=>{
       const item=await action({action:'delete',path:entry.path,version:entry.version});
       const related=(path)=>path===entry.path||path.startsWith(entry.path+'/');
-      if (current && related(current.path)) closePreview(true);
+      if (gridPath!==null && related(gridPath)) gridPath=parent(entry.path);
       if (related(selected)) selected=parent(entry.path);
+      if (current && related(current.path)) await closePreview(true);
       refreshing();
       await refresh();
       return item;
@@ -1377,7 +1441,7 @@ async function deleteMarked() {
     if (!decision) return;
     if (!await promptDialog({title:'deleteManyQuestion',values:{count:entries.length},message:entries.some(entry=>entry.kind==='directory')?'deleteDirectory':'',submit:'delete',danger:true})) return;
     progress=taskProgress('deletingFiles');
-    progress.update('deletingFiles',0,entries.length,'count');
+    progress.update('deletingFiles',0,entries.length+1);
     let removed=0, firstError, processed=0;
     for (let entry of entries) {
       try {
@@ -1385,14 +1449,15 @@ async function deleteMarked() {
         await action({action:'delete',path:entry.path,version:entry.version});
         removed++;
         for (const path of marked.keys()) if (containsPath(entry.path,path)) marked.delete(path);
-        if (current && containsPath(entry.path,current.path)) closePreview(true);
-        if (containsPath(entry.path,selected)) selected=parent(entry.path);
         if (gridPath!==null && containsPath(entry.path,gridPath)) gridPath=parent(entry.path);
+        if (containsPath(entry.path,selected)) selected=parent(entry.path);
+        if (current && containsPath(entry.path,current.path)) await closePreview(true);
       } catch(error) {firstError??=error;}
-      progress.update('deletingFiles',++processed,entries.length,'count');
+      progress.update('deletingFiles',++processed,entries.length+1);
     }
-    progress.update('refreshing');
+    progress.update('refreshing',processed,entries.length+1);
     await refresh();
+    progress.complete();
     const failed=entries.length-removed;
     toast('bulkResult',{removed,failed},failed>0);
     if (firstError) tell(firstError);
@@ -1448,10 +1513,10 @@ function rootSettings(signal) {
   }),'button',true);
   const restart=makeButton('restartService','refresh',async()=>{
     if (!await reviewEdits() || !window.confirm(t('restartConfirm'))) return;
-    await run('updateRestarting',async()=>{
+    await run('updateRestarting',async progress=>{
       feedback('');
       await json('/api/settings/restart',{method:'POST'});
-      await waitForRestart(status);
+      if (!await waitForRestart(status,undefined,progress)) throw {error:'restartReconnect'};
     });
   },'button',true);
   const field=document.createElement('div');
@@ -1576,6 +1641,7 @@ function updateSettings(signal) {
       const data=await json('/api/updates/versions?page='+nextPage,{signal:signal});
       for (const tag of data.versions) releases.add(tag);
       nextPage=data.nextPage || 0;
+      progress.complete();
     } catch(error) {
       if (!signal.aborted) feedback.textContent=errorOf(error);
     } finally {progress.finish();loadingVersions=false;paintVersions();}
@@ -1602,6 +1668,7 @@ function updateSettings(signal) {
     try {
       const data=await json('/api/updates/check',{method:'POST',signal:signal});
       paint(data);
+      progress.complete();
       feedback.textContent=t(data.available?'updateAvailable':data.supported?'updateCurrent':'updateUnsupported',{version:data.latest});
     } catch(error) {if (!signal.aborted) feedback.textContent=errorOf(error);}
     finally {progress.finish();check.disabled=false;}
@@ -1617,8 +1684,8 @@ function updateSettings(signal) {
     const progress=startProgress(body,'updating');
     try {
       await streamedOperation('/api/updates/install',{version},progress);
-      progress.update('updateRestarting');
-      await waitForRestart(feedback,version);
+      progress.update('updateRestarting',2,3);
+      await waitForRestart(feedback,version,progress);
     } catch(error) {feedback.textContent=errorOf(error);}
     finally {progress.finish();installing=false;paintVersions();}
   },'button',true);
@@ -1635,19 +1702,22 @@ function updateSettings(signal) {
   });
   return body;
 }
-async function waitForRestart(feedback,version) {
+async function waitForRestart(feedback,version,progress) {
   for (let attempt=0;attempt<20;attempt++) {
     await new Promise(resolve=>setTimeout(resolve,1000));
     // A service restart clears in-memory sessions, so reload when the new server responds.
     try {
       const reply=await fetch('/api/updates');
       if (reply.status===401 || (version && reply.ok && (await reply.json()).current===version)) {
+        progress?.complete();
+        if (progress) await new Promise(resolve=>setTimeout(resolve,180));
         location.reload();
-        return;
+        return true;
       }
     } catch {}
   }
   feedback.textContent=t(version?'updateReconnect':'restartReconnect');
+  return false;
 }
 
 function aboutSettings() {
@@ -1736,6 +1806,7 @@ function cacheSettings(signal) {
       slider.value=String(snapshot.limitMiB);
       apply(data);
       status.textContent=t(message);
+      progress.complete();
     } catch(error) {
       if (!signal.aborted) status.textContent=errorOf(error);
     } finally {progress.finish();busy=false;paint();}
@@ -1757,7 +1828,10 @@ function cacheSettings(signal) {
       try {
         await pendingCacheWrite?.catch(()=>{});
         const data=await json('/api/cache',{signal:signal});
-        if (!busy && requested===revision && !signal.aborted) apply(data);
+        if (!busy && requested===revision && !signal.aborted) {
+          apply(data);
+          initialProgress.complete();
+        }
       } catch(error) {
         if (!snapshot && !signal.aborted) status.textContent=errorOf(error);
       } finally {initialProgress.finish();}
@@ -1946,7 +2020,7 @@ async function showItemDetails(entry) {
     detailsRow(list,'detailMode',data.symbolic+' ('+data.mode+')');
     detailsRow(list,'detailInode',data.inode);
     detailsRow(list,'detailLinks',numeric.format(data.links));
-    body.replaceChildren(list);
+    replaceReady(body,list);
     if (data.kind==='directory') {
       const summary=document.createElement('section');
       summary.className='folder-details';
@@ -1962,7 +2036,7 @@ async function showItemDetails(entry) {
           detailsRow(totals,'detailContentsSize',bytes(total.bytes));
           detailsRow(totals,'detailFiles',numeric.format(total.files));
           detailsRow(totals,'detailSubfolders',numeric.format(total.folders));
-          result.replaceChildren(totals);
+          replaceReady(result,totals);
           if (total.partial) {
             const note=document.createElement('p');
             note.className='listing-state';
@@ -1988,7 +2062,8 @@ function listingState(list,key,values={}) {
   const message=document.createElement('p');
   message.className='listing-state';
   message.textContent=t(key,values);
-  list.replaceChildren(message);
+  if (key==='trashEmpty' || key==='noMatches') replaceReady(list,message);
+  else list.replaceChildren(message);
   if (key==='loading') startProgress(list,key,true);
 }
 
@@ -2037,10 +2112,12 @@ function openTrashPanel() {
     notice.textContent='';
     const progress=startProgress(toolbar,'trashClearing');
     try {
-      const result=await streamedOperation('/api/trash/clear',{},progress,'count');
+      const result=await streamedOperation('/api/trash/clear',{},progress);
       if (!panel.open) return;
       notice.textContent=t(result.failed?'trashClearPartial':'trashCleared',{removed:result.removed,failed:result.failed});
+      progress.update('refreshing',1,2);
       await update(true);
+      progress.complete();
     } catch(error) {
       if (panel.open) notice.textContent=errorOf(error);
     } finally {progress.finish();clear.disabled=false;list.inert=false;}
@@ -2078,10 +2155,13 @@ function openTrashPanel() {
           const button=makeButton(action,glyph,async()=>{
             for (const control of commands.children) control.disabled=true;
             notice.hidden=true;
-            const updated=await withProgress(text,action==='restore'?'restoringTrash':'purgingTrash',()=>changeTrash(item,action,error=>{
+            const progress=startProgress(text,action==='restore'?'restoringTrash':'purgingTrash');
+            const updated=await changeTrash(item,action,error=>{
               notice.textContent=errorOf(error);
               notice.hidden=false;
-            }));
+            });
+            if (updated) progress.complete();
+            progress.finish();
             if (updated) await update();
             else for (const control of commands.children) control.disabled=false;
           },'button '+(action==='purge'?'purge-button':''),true);
@@ -2091,7 +2171,7 @@ function openTrashPanel() {
         row.append(mark,text,commands);
         fragment.append(row);
       }
-      list.replaceChildren(fragment);
+      replaceReady(list,fragment);
       translate(list);
     } catch(error) {listingState(list,error?.error || 'network');}
   }
@@ -2137,7 +2217,7 @@ function openSearchPanel() {
       const matches=result.matches.filter(entry=>isVisiblePath(entry.path));
       if (!matches.length) listingState(list,'noMatches');
       else {
-        list.replaceChildren(...matches.map(entry=>{
+        replaceReady(list,...matches.map(entry=>{
           const {row,mark,text}=listingRow(entry,absolute(entry.path));
           row.classList.add('search-hit');
           row.setAttribute('aria-label',absolute(entry.path));
@@ -2483,10 +2563,15 @@ $('login-form').onsubmit=async(e)=>{
   const form=e.currentTarget, submit=form.querySelector('button[type=submit]');
   submit.disabled=true;
   const progress=startProgress(form,'signingIn');
+  progress.update('signingIn',0,2);
   try {
     await json('/api/login',{method:'POST',body:Object.fromEntries(new FormData(form))});
     form.elements.password.value='';
-    await showWorkspace(await json('/api/session'));
+    progress.update('signingIn',1,2);
+    const session=await json('/api/session');
+    progress.complete();
+    await new Promise(resolve=>setTimeout(resolve,180));
+    await showWorkspace(session);
   } catch(error) {
     loginError=error.error||'network';
     $('login-error').textContent=errorOf(error);
@@ -2529,13 +2614,7 @@ $('settings').innerHTML=icon('settings');
 $('settings').onclick=openSettings;
 $('open-grid').innerHTML=icon('grid');
 updateGridButton();
-$('open-grid').onclick=()=>{
-  if (gridPath===null) {openGrid();return;}
-  gridPath=null;
-  gridPreview?.abort();
-  updateGridButton();
-  setEmpty('emptyTitle','emptyHint');
-};
+$('open-grid').onclick=()=>closePreview();
 $('select-many').onclick=()=>{
   selecting=!selecting;
   if (!selecting) marked.clear();
@@ -2607,4 +2686,18 @@ divider.onkeydown=(e)=>{
 window.addEventListener('resize',()=>{resize(width);if (popup) renderMenu();});
 resize(width);
 translate(document);
-json('/api/session').then(showWorkspace).catch(e=>showLogin(e.error==='unauthenticated'?'':e.error||'network'));
+async function checkSession() {
+  try {
+    const session=await json('/api/session');
+    setProgress($('boot').querySelector('progress'),1,1);
+    await new Promise(resolve=>setTimeout(resolve,180));
+    await showWorkspace(session);
+  } catch(error) {
+    if (error.error==='unauthenticated') {
+      setProgress($('boot').querySelector('progress'),1,1);
+      await new Promise(resolve=>setTimeout(resolve,180));
+    }
+    showLogin(error.error==='unauthenticated'?'':error.error||'network');
+  }
+}
+checkSession();

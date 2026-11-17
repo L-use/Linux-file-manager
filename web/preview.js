@@ -1,5 +1,5 @@
 import {icon} from './icons.js';
-import {progressPercent,startProgress} from './progress.js';
+import {replaceReady,setProgress,startProgress} from './progress.js';
 import {t,translate} from './i18n.js';
 
 const heif = new Set(['heic','heics','heif','hif']);
@@ -98,13 +98,14 @@ function media(ctx,isVideo,fallback) {
   const previewRequest=useThumbnail?new AbortController():null;
   let thumbnailURL='', originalURL='', thumbnailSize, original, originalRequested=false, originalBlob, originalVersion;
   const originalStatus=node('div','media-conversion original-status');
-  const originalLabel=node('span'), originalProgress=node('progress'), originalPercent=node('span');
+  const originalLabel=node('span'), originalProgress=node('progress');
+  let originalStatusTimer, bufferProgressTimer;
   originalLabel.dataset.i18n='loadingOriginal';
   originalProgress.dataset.label='loadingOriginal';
-  originalProgress.max=1;
-  originalStatus.append(originalLabel,originalProgress,originalPercent);
+  setProgress(originalProgress);
+  originalStatus.append(originalLabel,originalProgress);
   const conversion=node('span','media-conversion');
-  startProgress(conversion,isVideo?'convertingVideo':'decodingImage');
+  const conversionProgress=startProgress(conversion,isVideo?'convertingVideo':'decodingImage');
   const base=()=>Math.min(fullscreen?Infinity:1,stageWidth/naturalWidth,stageHeight/naturalHeight);
   const max=()=>Math.max(8,base()*24);
   function paint() {
@@ -174,11 +175,13 @@ function media(ctx,isVideo,fallback) {
   stage.append(object);
   output.textContent='—';
   const pending=node('div','media-progress');
-  startProgress(pending,isVideo?'bufferingMedia':'loading');
+  const pendingProgress=startProgress(pending,isVideo?'bufferingMedia':'loading');
   stage.append(pending);
   function loading(active) {
     clearTimeout(bufferTimer);
+    clearTimeout(bufferProgressTimer);
     pending.hidden=!active;
+    if (active) setProgress(pendingProgress.element.querySelector('progress'));
     stage.setAttribute('aria-busy',String(active || conversion.isConnected || originalStatus.isConnected));
   }
   loading(true);
@@ -191,12 +194,24 @@ function media(ctx,isVideo,fallback) {
     schedulePaint();
   }
   function frameReady() {
-    conversion.remove();
-    originalStatus.remove();
+    if (conversion.isConnected) {
+      conversionProgress.complete();
+      setTimeout(()=>conversion.remove(),180);
+    }
+    if (originalStatus.isConnected) {
+      setProgress(originalProgress,1,1);
+      clearTimeout(originalStatusTimer);
+      originalStatusTimer=setTimeout(()=>originalStatus.remove(),180);
+    }
+    if (!pending.hidden) {
+      setProgress(pendingProgress.element.querySelector('progress'),1,1);
+      clearTimeout(bufferProgressTimer);
+      bufferProgressTimer=setTimeout(()=>loading(false),180);
+    }
     if (originalBlob && originalVersion) ctx.rememberImage(originalBlob,originalVersion);
     originalBlob=null;
     originalVersion=null;
-    loading(false);
+    stage.setAttribute('aria-busy','false');
   }
   function dropThumbnail() {
     if (thumbnailURL) URL.revokeObjectURL(thumbnailURL);
@@ -204,11 +219,11 @@ function media(ctx,isVideo,fallback) {
     thumbnailSize=null;
   }
   async function loadOriginal(image) {
+    clearTimeout(originalStatusTimer);
     stage.append(originalStatus);
     translate(stage);
     loading(false);
-    originalProgress.removeAttribute('value');
-    originalPercent.textContent='';
+    setProgress(originalProgress);
     try {
       const cached=await ctx.cachedImage();
       if (disposed) return;
@@ -242,15 +257,13 @@ function media(ctx,isVideo,fallback) {
           loaded+=value.byteLength;
           if (loaded>96*1024*1024) {
             await reader.cancel();
-            originalProgress.removeAttribute('value');
-            originalPercent.textContent='';
+            setProgress(originalProgress);
             image.src=ctx.url;
             return;
           }
           parts.push(value);
           if (total>0) {
-            originalProgress.value=Math.min(1,loaded/total);
-            originalPercent.textContent=progressPercent(loaded,total);
+            setProgress(originalProgress,loaded,total);
           }
         }
       }
@@ -295,7 +308,8 @@ function media(ctx,isVideo,fallback) {
       originalVersion=null;
       original=null;
       originalRequested=false;
-      frameReady();
+      originalStatus.remove();
+      loading(false);
       if (thumbnailURL) ctx.notify({error:'originalError'});
       else {
         previewRequest.abort();
@@ -458,6 +472,8 @@ function media(ctx,isVideo,fallback) {
     resize.disconnect();
     cancelAnimationFrame(frame);
     clearTimeout(bufferTimer);
+    clearTimeout(bufferProgressTimer);
+    clearTimeout(originalStatusTimer);
     previewRequest?.abort();
     original?.removeAttribute('src');
     if (originalURL) URL.revokeObjectURL(originalURL);
@@ -493,7 +509,8 @@ function media(ctx,isVideo,fallback) {
           dimensions(object.width,object.height);
           frameReady();
         } else {
-          conversion.remove();
+          conversionProgress.complete();
+          setTimeout(()=>conversion.remove(),180);
           loading(true);
           object.src=asset.url;
         }
@@ -578,6 +595,7 @@ async function source(ctx) {
         const {marked}=await import('/vendor/marked/lib/marked.esm.js');
         parsed=await sanitizer(marked.parse(normalized));
         waitLive(ctx);
+        progress.complete();
       } catch(e) {if (!ctx.signal.aborted) ctx.report('readError');return;}
       finally {progress.finish();toggleMarkdown.disabled=false;}
     }
@@ -697,6 +715,7 @@ async function source(ctx) {
       await ctx.saveText((data.bom?'\uFEFF':'')+value,data.version);
       editing=false;
       syncEditor();
+      progress.complete();
       await ctx.saved();
       return true;
     } catch(error) {
@@ -725,7 +744,7 @@ async function source(ctx) {
   };
   syncEditor();
   showSource();
-  ctx.host.replaceChildren(tools,...(data.truncated?[note]:[]),scroll);
+  replaceReady(ctx.host,tools,...(data.truncated?[note]:[]),scroll);
   labels();
   return {language:labels,dirty,save,saving:()=>saving,destroy(){window.removeEventListener('beforeunload',beforeUnload);}};
 }
@@ -852,7 +871,7 @@ async function word(ctx) {
   function showPreview() {
     editing=false;
     sync();
-    ctx.host.replaceChildren(tools,previewNote,scroll);
+    replaceReady(ctx.host,tools,previewNote,scroll);
   }
   async function edit() {
     const progress=startProgress(ctx.host,'loading');
@@ -881,7 +900,8 @@ async function word(ctx) {
       });
       fields.replaceChildren(...inputs);
       editing=true;
-      ctx.host.replaceChildren(tools,editNote,fields);
+      progress.complete();
+      ctx.host.replaceChildren(tools,editNote,fields,progress.element);
       translate(ctx.host);
       inputs[0].lastChild.focus();
     } catch (error) {
@@ -901,6 +921,7 @@ async function word(ctx) {
       await ctx.saveWord([...changes].map(([index,text])=>({index,text})),data.version);
       changes.clear();
       sync();
+      progress.complete();
       await ctx.saved();
       return true;
     } catch (error) {
@@ -990,6 +1011,7 @@ async function spreadsheet(ctx) {
       await ctx.saveSheet([...changes.values()],ctx.entry.version);
       changes.clear();
       syncEdits();
+      progress.complete();
       await ctx.saved();
       return true;
     } catch (error) {
@@ -1117,7 +1139,7 @@ async function spreadsheet(ctx) {
     scroll.scrollTop=0;
     scroll.scrollLeft=0;
   }
-  ctx.host.replaceChildren(tools,note,...(canEdit?[editNote]:[]),scroll,...(buttons.length>1?[tabs]:[]));
+  replaceReady(ctx.host,tools,note,...(canEdit?[editNote]:[]),scroll,...(buttons.length>1?[tabs]:[]));
   syncEdits();
   draw();
   return {language:labels,dirty,save,saving:()=>saving,destroy(){window.removeEventListener('beforeunload',beforeUnload);}};
@@ -1141,7 +1163,7 @@ async function pdf(ctx) {
   catch(error) {progress.finish();throw error;}
   let stopped=false;
   task.onProgress=({loaded,total})=>{
-    if (!stopped) progress.update('loadingPDF',loaded,total);
+    if (!stopped) progress.update('loadingPDF',total>0?Math.min(1,loaded/total):0,2);
   };
   function stopTask() {
     if (!stopped) {stopped=true;task.destroy().catch(()=>{});}
@@ -1151,7 +1173,7 @@ async function pdf(ctx) {
     const pdfDoc=await task.promise;
     waitLive(ctx);
     task.onProgress=null;
-    progress.update('renderingPage');
+    progress.update('renderingPage',1,2);
     const first=await pdfDoc.getPage(1);
     waitLive(ctx);
     const tools=toolbar(), scroll=node('div','preview-scroll pdf-scroll'), field=node('input'), total=node('output'), zoomLabel=node('output');
@@ -1184,8 +1206,9 @@ async function pdf(ctx) {
       pages.append(element);
     }
     scroll.append(pages);
+    progress.complete();
+    ctx.host.replaceChildren(tools,scroll,progress.element);
     progress.finish();
-    ctx.host.replaceChildren(tools,scroll);
 
     function dimensions(item) {
       const width=fitWidth()*scale;
@@ -1230,7 +1253,8 @@ async function pdf(ctx) {
         pending.set(index,request);
         try {await request.promise;} finally {if (pending.get(index)===request) pending.delete(index);}
         if (stopped || stamp!==version || !live.has(index)) return;
-        item.element.replaceChildren(canvas);
+        progress.complete();
+        item.element.replaceChildren(canvas,progress.element);
         item.rendered=stamp;
       } catch(error) {
         if (!stopped && error?.name!=='RenderingCancelledException') {
@@ -1294,7 +1318,7 @@ function encodingFailure(ctx) {
   waitLive(ctx);
   const tools=toolbar();
   tools.append(encodingSelect(ctx,'—'));
-  ctx.host.replaceChildren(tools,badge('encoding'));
+  replaceReady(ctx.host,tools,badge('encoding'));
 }
 function decodeCSV(buffer,preferred) {
   const bytes=new Uint8Array(buffer);
@@ -1331,7 +1355,8 @@ function audioPreview(ctx) {
     if (feedback) feedback.update(label);
     else feedback=startProgress(card,label);
   }
-  function ready() {
+  function ready(completed=true) {
+    if (completed!==false) feedback?.complete();
     feedback?.finish();
     feedback=null;
   }
@@ -1339,7 +1364,7 @@ function audioPreview(ctx) {
   player.onloadeddata=player.oncanplay=player.onplaying=ready;
   player.onerror=async()=>{
     if (ctx.signal.aborted) return;
-    if (retried) {ready();ctx.report('audioPlaybackError');return;}
+    if (retried) {ready(false);ctx.report('audioPlaybackError');return;}
     retried=true;
     waiting('convertingAudio');
     try {
@@ -1347,7 +1372,7 @@ function audioPreview(ctx) {
       waitLive(ctx);
       waiting('bufferingMedia');
     } catch(error) {
-      ready();
+      ready(false);
       if (!ctx.signal.aborted) {
         const messages={videoToolMissing:'audioToolMissing',videoBusy:'audioConvertBusy',videoConvertFailed:'audioConvertFailed',videoLimit:'audioConvertLimit'};
         ctx.report(messages[error?.error] || error?.error || 'audioPlaybackError');
@@ -1359,7 +1384,7 @@ function audioPreview(ctx) {
   view.append(card);
   ctx.host.replaceChildren(view);
   player.src=ctx.url;
-  return {destroy(){ready();player.onerror=player.onwaiting=player.onloadeddata=player.oncanplay=player.onplaying=null;player.pause();player.removeAttribute('src');player.load();}};
+  return {destroy(){ready(false);player.onerror=player.onwaiting=player.onloadeddata=player.oncanplay=player.onplaying=null;player.pause();player.removeAttribute('src');player.load();}};
 }
 
 async function archiveView(ctx) {
@@ -1398,7 +1423,7 @@ async function archiveView(ctx) {
   if (archive.limited) scroll.append(badge('archivePreviewPartial'));
   if (archive.entries.length) scroll.append(list);
   else scroll.append(badge('archiveEmpty'));
-  ctx.host.replaceChildren(scroll);
+  replaceReady(ctx.host,scroll);
 }
 
 function slidePage(data,imageURL) {
@@ -1437,7 +1462,7 @@ async function presentationView(ctx) {
   thumbnails.dataset.label='slideNavigation';
   const previews=new Map([[slide.page,Promise.resolve(slide)]]);
   tools.append(previous,position,count,next);
-  ctx.host.replaceChildren(tools,stage,thumbnails,detail);
+  replaceReady(ctx.host,tools,stage,thumbnails,detail);
   let pending;
   function render() {
     position.value=String(slide.page);position.max=String(slide.count);
@@ -1450,13 +1475,13 @@ async function presentationView(ctx) {
     if (pendingImages.length) {
       const progress=startProgress(stage,'loadingSlideImages');
       let loaded=images.length-pendingImages.length;
-      progress.update('loadingSlideImages',loaded,images.length,'count');
+      progress.update('loadingSlideImages',loaded,images.length);
       for (const image of pendingImages) {
         const settle=()=>{
           image.removeEventListener('load',settle);
           image.removeEventListener('error',settle);
-          progress.update('loadingSlideImages',++loaded,images.length,'count');
-          if (loaded===images.length) progress.finish();
+          progress.update('loadingSlideImages',++loaded,images.length);
+          if (loaded===images.length) {progress.complete();progress.finish();}
         };
         image.addEventListener('load',settle);
         image.addEventListener('error',settle);
@@ -1491,7 +1516,7 @@ async function presentationView(ctx) {
     const {signal}=pending;
     const progress=startProgress(tools,'loadingSlide');
     signal.addEventListener('abort',progress.finish,{once:true});
-    try {const selected=await (previews.get(page) || ctx.slide(page,signal));if (!signal.aborted) {slide=selected;render();}}
+    try {const selected=await (previews.get(page) || ctx.slide(page,signal));if (!signal.aborted) {slide=selected;render();progress.complete();}}
     catch(error) {if (!signal.aborted) ctx.notify(error);}
     finally {progress.finish();}
   }
@@ -1739,7 +1764,8 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL,cache) {
     };
     const progress=startProgress(element,'loadingThumbnail',true);
     rendered.add(progress.element);
-    function finish() {
+    function finish(completed=false) {
+      if (completed===true) progress.complete();
       progress.finish();
       rendered.delete(progress.element);
     }
@@ -1749,11 +1775,13 @@ export function mountGridThumbnails(grid,items,signal,route,fileURL,cache) {
       if (!content || signal.aborted) return;
       attach(content);
       if (content instanceof HTMLImageElement && !content.complete) {
-        content.addEventListener('load',finish,{once:true});
+        content.addEventListener('load',()=>finish(true),{once:true});
         content.addEventListener('error',finish,{once:true});
       }
     } finally {
-      if (!(content instanceof HTMLImageElement) || content.complete || signal.aborted) finish();
+      if (!(content instanceof HTMLImageElement) || content.complete || signal.aborted) {
+        finish(!signal.aborted && Boolean(content) && (!(content instanceof HTMLImageElement) || content.naturalWidth>0));
+      }
     }
     function remember() {
       if (!signal.aborted && (content instanceof HTMLImageElement
