@@ -272,7 +272,6 @@ a.button:visited{color:inherit}
 }
 @media (pointer:coarse) and (min-width:691px) and (min-height:501px){.tree-more{visibility:visible}.tree-main,.tree-row{min-height:34px}.tree-more{min-height:32px}}
 @media(max-width:380px){.media-controls input.volume{width:40px}.media-controls{gap:3px}.connection span{display:none}}
-.media-spinner{position:absolute;inset:0;margin:auto;z-index:1;pointer-events:none}
 @media (max-width:690px), (max-height:500px) and (pointer:coarse){.empty .mobile-toggle.download{width:auto;padding:0 9px}.empty .mobile-toggle.download span{display:inline}}
 .focus-tooltip{position:fixed;z-index:18;background:#263952;color:#fff;max-width:calc(100vw - 10px);padding:5px 8px;border-radius:5px;overflow-wrap:anywhere;font-size:12px;pointer-events:none}
 .editor:fullscreen{
@@ -540,4 +539,25 @@ a.button:visited{color:inherit}
   z-index:5;width:44px;min-height:44px;color:#fff;background:#171d27d9;border:1px solid #ffffff50;
  }
  .editor.preview-fullscreen .preview-scroll{scroll-padding-top:52px}
+}
+
+.operation-progress{
+ display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;width:min(100%,295px);
+ color:var(--ink);font-size:12px;font-variant-numeric:tabular-nums
+}
+.operation-progress>progress{flex:1 1 80px;min-width:0;height:8px;accent-color:var(--blue)}
+.operation-progress>span:last-child:empty{display:none}
+.operation-progress.compact{width:100%;gap:0}
+.operation-progress.compact>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.operation-progress.compact>progress{height:5px}
+.tree-note>.operation-progress{margin-top:5px}
+.toasts .operation-progress{width:min(265px,calc(100vw - 56px))}
+.preview-host>.operation-progress{flex:none;margin-bottom:6px}
+.pdf-page>.operation-progress,.tile-preview>.operation-progress{
+ position:absolute;z-index:1;bottom:6px;left:10%;width:80%;pointer-events:none
+}
+.pdf-page>.operation-progress{top:8px;bottom:auto}
+.media-progress{position:absolute;z-index:2;inset:auto 12px 12px;pointer-events:none;display:grid;justify-items:center}
+.media-progress>.operation-progress,.media-conversion>.operation-progress{
+ padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--glass)
 }

@@ -246,7 +246,8 @@ func (t *trashStore) clear(ctx context.Context) (trashClearResult, error) {
 	if err != nil {
 		return result, err
 	}
-	for _, item := range items {
+	reportOperation(ctx, "trashClearing", 0, int64(len(items)))
+	for index, item := range items {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -255,6 +256,7 @@ func (t *trashStore) clear(ctx context.Context) (trashClearResult, error) {
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			result.Failed++
 		}
+		reportOperation(ctx, "trashClearing", int64(index+1), int64(len(items)))
 	}
 	return result, nil
 }

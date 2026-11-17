@@ -140,6 +140,7 @@ func (t *thumbnails) serveRaster(s *fileStore, w http.ResponseWriter, r *http.Re
 		return err
 	}
 	defer input.Close()
+	w.Header().Set("X-FM-File-Version", version(info))
 	if info.Size() > 128<<20 {
 		return failure(413, "rasterLimit")
 	}

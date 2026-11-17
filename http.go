@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -24,7 +25,7 @@ type problem struct {
 func (e *problem) Error() string               { return e.code }
 func failure(status int, code string) *problem { return &problem{status: status, code: code} }
 
-func report(w http.ResponseWriter, err error) {
+func describeProblem(err error) *problem {
 	var p *problem
 	if !errors.As(err, &p) {
 		switch {
@@ -48,6 +49,11 @@ func report(w http.ResponseWriter, err error) {
 			p = failure(500, "io")
 		}
 	}
+	return p
+}
+
+func report(w http.ResponseWriter, err error) {
+	p := describeProblem(err)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("X-FM-Error", p.code)
 	w.WriteHeader(p.status)
@@ -204,10 +210,9 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		if tag == "" {
 			tag = input.Latest
 		}
-		if err := updates.install(r.Context(), tag, false); err != nil {
-			return err
-		}
-		return respond(w, map[string]bool{"ok": true})
+		return operationResponse(w, r, func(ctx context.Context) (any, error) {
+			return map[string]bool{"ok": true}, updates.install(ctx, tag, false)
+		})
 	})
 	register("GET /api/server-status", true, func(w http.ResponseWriter, r *http.Request) error {
 		return respond(w, monitor.sample(s.root, r.URL.Query().Get("services") == "1"))
@@ -235,11 +240,9 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		return respond(w, entries)
 	})
 	register("POST /api/trash/clear", true, func(w http.ResponseWriter, r *http.Request) error {
-		result, err := trash.clear(r.Context())
-		if err != nil {
-			return err
-		}
-		return respond(w, result)
+		return operationResponse(w, r, func(ctx context.Context) (any, error) {
+			return trash.clear(ctx)
+		})
 	})
 	for action, operation := range map[string]func(string) error{"restore": trash.restore, "purge": trash.purge} {
 		register("POST /api/trash/"+action, true, func(w http.ResponseWriter, r *http.Request) error {
@@ -343,6 +346,7 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 			disposition = "attachment"
 			contentType = "application/octet-stream"
 		}
+		w.Header().Set("X-FM-File-Version", version(info))
 		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": name}))
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
@@ -447,7 +451,9 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 		case "chmod":
 			err = s.chmod(input.Path, input.Version, input.Permissions)
 		case "extractZip":
-			err = s.extractZip(r.Context(), input.Path, input.Destination, input.Version)
+			return operationResponse(w, r, func(ctx context.Context) (any, error) {
+				return map[string]bool{"ok": true}, s.extractZip(ctx, input.Path, input.Destination, input.Version)
+			})
 		default:
 			return failure(400, "badRequest")
 		}
@@ -465,7 +471,7 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 	})
 	static := http.FileServerFS(web)
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/vendor/") && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/preview.js" && r.URL.Path != "/icons.js" && r.URL.Path != "/i18n.js" && r.URL.Path != "/heif-worker.js" && r.URL.Path != "/night.css" && r.URL.Path != "/theme.js" && r.URL.Path != "/server-status.js" {
+		if r.URL.Path != "/" && !strings.HasPrefix(r.URL.Path, "/vendor/") && r.URL.Path != "/app.js" && r.URL.Path != "/style.css" && r.URL.Path != "/preview.js" && r.URL.Path != "/progress.js" && r.URL.Path != "/icons.js" && r.URL.Path != "/i18n.js" && r.URL.Path != "/heif-worker.js" && r.URL.Path != "/night.css" && r.URL.Path != "/theme.js" && r.URL.Path != "/server-status.js" {
 			http.NotFound(w, r)
 			return
 		}

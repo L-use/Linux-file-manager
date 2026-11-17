@@ -1,4 +1,13 @@
 const strings = {
+ processing:['正在处理…','Working…'], savingChanges:['正在保存…','Saving changes…'],
+ refreshing:['正在刷新目录…','Refreshing folders…'], deletingFiles:['正在删除所选项目…','Deleting selected items…'],
+ zipExtractingProgress:['正在解压 ZIP…','Extracting ZIP…'], zipFinishing:['正在写入解压结果…','Finishing extraction…'],
+ updateDownloading:['正在下载安装包…','Downloading update…'], updateVerifying:['正在校验并准备安装…','Verifying and preparing the update…'],
+ loadingVersions:['正在加载版本列表…','Loading versions…'], cacheClearing:['正在清理预览缓存…','Clearing preview cache…'],
+ signingIn:['正在登录…','Signing in…'], loadingSlide:['正在加载幻灯片…','Loading slide…'],
+ renderingPage:['正在渲染 PDF 页面…','Rendering PDF page…'], loadingThumbnail:['正在生成缩略图…','Loading thumbnail…'],
+ bufferingMedia:['正在缓冲…','Buffering…'], restoringTrash:['正在还原…','Restoring…'], purgingTrash:['正在永久删除…','Permanently deleting…'],
+
  formatFilter:['按文件格式筛选','Filter by file format'], formatAll:['全部格式','All formats'],
  formatWord:['Word 文档','Word documents'], formatExcel:['Excel / CSV','Excel / CSV'],
  formatImages:['图片','Images'], formatPDF:['PDF','PDF'], formatVideos:['视频','Videos'], formatAudio:['音频','Audio'],
@@ -63,7 +72,7 @@ const strings = {
  selectMany:['多选','Select multiple'], selectItem:['选择「{name}」','Select “{name}”'], selectedItems:['已选 {count} 项','{count} selected'],
  deleteManyQuestion:['将 {count} 项移入回收站？','Move {count} items to the recycle bin?'],
  bulkResult:['已移入回收站 {removed} 项，失败 {failed} 项。','Moved {removed} items to the recycle bin. {failed} failed.'],
- clearCache:['清除预览缓存','Clear preview cache'], cacheHelp:['用量统计的是服务器生成的图片预览、封面和音视频转码。浏览器生成的缩略图在本次登录内复用。清除后会按需重新生成。','Usage covers server-generated image previews, posters, and converted audio and video. Browser-generated thumbnails are reused during this sign-in. Previews are regenerated as needed after clearing.'],
+ clearCache:['清除预览缓存','Clear preview cache'], cacheHelp:['用量统计的是服务器生成的图片预览、封面和音视频转码。浏览器在当前页面会话中复用缩略图和近期加载的原图。清除后会按需重新生成。','Usage covers server-generated image previews, posters, and converted audio and video. Thumbnails and recently loaded originals are reused within this page session. Previews are regenerated as needed after clearing.'],
  cacheCleared:['预览缓存已清除。','Preview cache cleared.'], serverNetwork:['网络','Network'], serverOffline:['离线','Offline'],
 
  dayMode:['白昼','Day'], nightMode:['黑夜','Night'], nightTheme:['黑夜模式','Night mode'],

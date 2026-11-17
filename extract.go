@@ -95,14 +95,24 @@ func (s *fileStore) extractZip(ctx context.Context, name, destination, expected 
 		return err
 	}
 	defer func() { _ = s.unlink(parent, temp, initial) }()
-	for _, member := range archive.File {
+	var extracted int64
+	update := func(n int) {
+		extracted += int64(n)
+		reportOperation(ctx, "zipExtractingProgress", extracted, int64(expanded))
+	}
+	update(0)
+	for index, member := range archive.File {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := extractZipMember(ctx, staging, member); err != nil {
+		if err := extractZipMember(ctx, staging, member, update); err != nil {
 			return err
 		}
+		if expanded == 0 {
+			reportOperation(ctx, "zipExtractingProgress", int64(index+1), int64(len(archive.File)))
+		}
 	}
+	reportOperation(ctx, "zipFinishing", 0, 0)
 	if latest, err := descriptorStat(source); err != nil || !matches(latest, expected) {
 		if err != nil {
 			return err
@@ -160,7 +170,7 @@ func (r extractionReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func extractZipMember(ctx context.Context, root *os.File, member *zip.File) error {
+func extractZipMember(ctx context.Context, root *os.File, member *zip.File, progress func(int)) error {
 	pieces := strings.Split(strings.TrimSuffix(member.Name, "/"), "/")
 	dirs := pieces[:len(pieces)-1]
 	folder := member.Mode().IsDir()
@@ -197,7 +207,7 @@ func extractZipMember(ctx context.Context, root *os.File, member *zip.File) erro
 	if err != nil {
 		return err
 	}
-	length, err := io.Copy(output, io.LimitReader(extractionReader{ctx, input}, int64(member.UncompressedSize64)+1))
+	length, err := io.Copy(progressWriter{output, progress}, io.LimitReader(extractionReader{ctx, input}, int64(member.UncompressedSize64)+1))
 	closeErr := output.Close()
 	if err != nil {
 		return err

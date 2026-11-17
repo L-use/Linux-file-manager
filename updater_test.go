@@ -42,10 +42,23 @@ func TestReleaseDownloadRejectsInvalidChecksum(t *testing.T) {
 		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
 			body = strings.Repeat("0", 64) + "  file-manager-linux-" + runtime.GOARCH + ".tar.gz\n"
 		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+		return &http.Response{StatusCode: 200, ContentLength: int64(len(body)), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})
-	if file, err := u.download(context.Background(), "v1.0.6"); file != "" || err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+	var downloaded, expected int64
+	var verifying bool
+	ctx := context.WithValue(context.Background(), operationProgressKey{}, func(stage string, done, total int64) {
+		if stage == "updateDownloading" {
+			downloaded, expected = done, total
+		}
+		if stage == "updateVerifying" {
+			verifying = true
+		}
+	})
+	if file, err := u.download(ctx, "v1.0.6"); file != "" || err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("download returned %q, %v", file, err)
+	}
+	if downloaded != int64(len("invalid archive")) || downloaded != expected || !verifying {
+		t.Fatalf("progress before checksum rejection: %d/%d bytes, verifying=%v", downloaded, expected, verifying)
 	}
 }
 

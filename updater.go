@@ -357,6 +357,7 @@ func (u *releaseUpdater) install(ctx context.Context, tag string, automatic bool
 		}
 	}()
 
+	reportOperation(ctx, "updating", 0, 0)
 	path, err := u.download(ctx, tag)
 	if err != nil {
 		log.Printf("Prepare update %s: %v", tag, err)
@@ -418,11 +419,18 @@ func (u *releaseUpdater) download(ctx context.Context, tag string) (string, erro
 		return "", err
 	}
 	digest := sha256.New()
-	n, err := io.Copy(io.MultiWriter(archive, digest), io.LimitReader(resp.Body, updateBinaryLimit+1))
+	var downloaded int64
+	update := func(n int) {
+		downloaded += int64(n)
+		reportOperation(ctx, "updateDownloading", downloaded, resp.ContentLength)
+	}
+	update(0)
+	n, err := io.Copy(progressWriter{io.MultiWriter(archive, digest), update}, io.LimitReader(resp.Body, updateBinaryLimit+1))
 	resp.Body.Close()
 	if err != nil {
 		return "", err
 	}
+	reportOperation(ctx, "updateVerifying", 0, 0)
 	if n > updateBinaryLimit || !slices.Equal(checksum, digest.Sum(nil)) {
 		return "", errors.New("release checksum mismatch or archive too large")
 	}

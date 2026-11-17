@@ -1,4 +1,5 @@
 import {icon} from './icons.js';
+import {startProgress,withProgress} from './progress.js';
 import {language, setLanguage, t, translate} from './i18n.js';
 import {mountPreview, fileType, formatCategory, mountGridThumbnails} from './preview.js';
 import {createServerStatus} from './server-status.js';
@@ -28,6 +29,27 @@ let sessionUser='', loginError = '', uploadState = null, uploadResult = null, po
 let gridPath=null, selecting=false, bulkBusy=false, gridPreview;
 const gridThumbnails=new Map();
 const marked=new Map();
+const originalImages=new Map();
+const originalImageLimit=128*1024*1024;
+let originalImageBytes=0, imageCacheGeneration=0;
+
+function clearOriginalImages() {
+  imageCacheGeneration++;
+  originalImages.clear();
+  originalImageBytes=0;
+}
+function rememberImage(route,version,blob) {
+  if (!version || blob.size>originalImageLimit) return;
+  originalImageBytes-=originalImages.get(route)?.blob.size || 0;
+  originalImages.delete(route);
+  originalImages.set(route,{version,blob});
+  originalImageBytes+=blob.size;
+  while (originalImageBytes>originalImageLimit || originalImages.size>32) {
+    const key=originalImages.keys().next().value;
+    originalImageBytes-=originalImages.get(key).blob.size;
+    originalImages.delete(key);
+  }
+}
 
 const parent = (name) => name.includes('/') ? name.slice(0,name.lastIndexOf('/')) : '';
 const join = (directory,name) => directory ? directory + '/' + name : name;
@@ -63,6 +85,36 @@ async function api(route, options = {}) {
 }
 async function json(route, options) { return (await api(route,options)).json(); }
 const action = (body) => json('/api/action',{method:'POST',body});
+async function streamedOperation(route,body,progress,unit='percent') {
+  const response=await api(route,{method:'POST',body,headers:{Accept:'application/x-ndjson'}});
+  if (!response.body || !response.headers.get('Content-Type')?.startsWith('application/x-ndjson')) return response.json();
+  const reader=response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer='';
+  try {
+    for (;;) {
+      const {done,value}=await reader.read();
+      if (done) break;
+      buffer+=value;
+      let end;
+      while ((end=buffer.indexOf('\n'))!==-1) {
+        const event=JSON.parse(buffer.slice(0,end));
+        buffer=buffer.slice(end+1);
+        if (event.error) throw event;
+        if (Object.hasOwn(event,'result')) return event.result;
+        if (event.stage) progress.update(event.stage,event.done,event.total,unit);
+      }
+    }
+    throw {error:'network'};
+  } finally {await reader.cancel().catch(()=>{});}
+}
+function taskProgress(label) {
+  const box=document.createElement('div');
+  box.className='toast';
+  const progress=startProgress(box,label);
+  box.translateMessage=()=>translate(box);
+  $('toasts').append(box);
+  return {...progress,finish:()=>box.remove()};
+}
 const liveStatus=createServerStatus(json,size);
 function bytesPercent(bytes,total,complete=false) {
   return total>0?Math.min(1,bytes/total):Number(complete);
@@ -262,6 +314,7 @@ function showLogin(error='') {
   gridPath=null;
   gridPreview?.abort();
   gridThumbnails.clear();
+  clearOriginalImages();
   selecting=false;
   marked.clear();
   $('settings').hidden=false;
@@ -338,6 +391,7 @@ function directoryNote(key,depth) {
   note.className='tree-note';
   note.style.setProperty('--depth',depth);
   note.textContent=t(key);
+  if (key==='loading') startProgress(note,key,true);
   return note;
 }
 function orderChildren(children) {
@@ -627,59 +681,67 @@ function targetDirectory() {
 async function refresh(notify=false) {
   const newest=[...new Set([...expanded,...cache.keys()])].sort((a,b)=>a.split('/').length-b.split('/').length);
   if (!newest.includes('')) newest.unshift('');
-  for (const path of newest) {
-    await loadDirectory(path);
-    if (path && directoryErrors.get(path)==='missing') {
-      expanded.delete(path);
-      directoryErrors.delete(path);
-      if (selected===path) selected=parent(path);
-    }
-  }
-  for (const path of [...cache.keys()]) {
-    const siblings=cache.get(parent(path));
-    if (path && siblings && !siblings.some(entry=>entry.path===path && entry.kind==='directory')) {
-      cache.delete(path);
-      expanded.delete(path);
-    }
-  }
-  const requested=current;
-  if (requested) {
-    try {
-      const live=await json(query('stat',requested.path));
-      if (current!==requested) return;
-      if (live.kind!==requested.kind) throw {error:'changed'};
-      if (live.version!==requested.version) {
-        if (unsaved()) tell({error:'changed'});
-        else await showFile(live,{focus:false,closeDrawer:false,changeTarget:false});
-      }
-    } catch(error) {
-      if (current===requested && unsaved()) tell(error);
-      else if (current===requested) {
-        closePreview();
-        if (selected===requested.path) selected=parent(requested.path);
-        setEmpty(error.error || 'readError');
-        tell(error);
+  const progress=notify?taskProgress('refreshing'):null;
+  progress?.update('refreshing',0,newest.length,'count');
+  try {
+    for (const [index,path] of newest.entries()) {
+      await loadDirectory(path);
+      progress?.update('refreshing',index+1,newest.length,'count');
+      if (path && directoryErrors.get(path)==='missing') {
+        expanded.delete(path);
+        directoryErrors.delete(path);
+        if (selected===path) selected=parent(path);
       }
     }
-  }
-  while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
-  renderTree();
-  if (notify) {
-    if (directoryErrors.has('')) tell({error:directoryErrors.get('')});
-    else toast('refreshed');
-  }
+    for (const path of [...cache.keys()]) {
+      const siblings=cache.get(parent(path));
+      if (path && siblings && !siblings.some(entry=>entry.path===path && entry.kind==='directory')) {
+        cache.delete(path);
+        expanded.delete(path);
+      }
+    }
+    const requested=current;
+    if (requested) {
+      try {
+        const live=await json(query('stat',requested.path));
+        if (current!==requested) return;
+        if (live.kind!==requested.kind) throw {error:'changed'};
+        if (live.version!==requested.version) {
+          if (unsaved()) tell({error:'changed'});
+          else await showFile(live,{focus:false,closeDrawer:false,changeTarget:false});
+        }
+      } catch(error) {
+        if (current===requested && unsaved()) tell(error);
+        else if (current===requested) {
+          closePreview();
+          if (selected===requested.path) selected=parent(requested.path);
+          setEmpty(error.error || 'readError');
+          tell(error);
+        }
+      }
+    }
+    while (gridPath && !cache.has(gridPath) && !directoryErrors.has(gridPath)) gridPath=parent(gridPath);
+    renderTree();
+    if (notify) {
+      if (directoryErrors.has('')) tell({error:directoryErrors.get('')});
+      else toast('refreshed');
+    }
+  } finally {progress?.finish();}
 }
 
 function setEmpty(title, description='', entry=null, loading=false) {
   const host=$('preview-host');
   const box=document.createElement('div');
   box.className='empty';
-  const mark=document.createElement('div');
-  mark.className=loading?'spinner':'empty-mark';
-  if (!loading) mark.innerHTML=icon(title==='emptyTitle'?'file':'alert');
-  const heading=document.createElement('strong');
-  heading.dataset.i18n=title;
-  box.append(mark,heading);
+  if (loading) startProgress(box,title);
+  else {
+    const mark=document.createElement('div');
+    mark.className='empty-mark';
+    mark.innerHTML=icon(title==='emptyTitle'?'file':'alert');
+    const heading=document.createElement('strong');
+    heading.dataset.i18n=title;
+    box.append(mark,heading);
+  }
   if (description) {
     const p=document.createElement('p');
     p.dataset.i18n=description;
@@ -818,7 +880,25 @@ async function showFile(entry, options={}) {
       renderTree();
     } else if (unavailable) $('download').hidden=true;
   }
+  const imageGeneration=imageCacheGeneration;
   const context={
+    async cachedImage() {
+      const cached=originalImages.get(url);
+      if (!cached) return null;
+      // Reopening a preview must still pass server-side authorization and version checks.
+      const head=await api(fileURL(entry.path),{method:'HEAD',signal:controller.signal});
+      if (imageGeneration!==imageCacheGeneration || originalImages.get(url)!==cached) return null;
+      if (head.headers.get('X-FM-File-Version')!==cached.version) {
+        originalImages.delete(url);
+        originalImageBytes-=cached.blob.size;
+        return null;
+      }
+      rememberImage(url,cached.version,cached.blob);
+      return cached;
+    },
+    rememberImage(blob,version) {
+      if (alive() && imageGeneration===imageCacheGeneration) rememberImage(url,version,blob);
+    },
     host:$('preview-host'),signal:controller.signal,url,fullscreen:fullscreenPreview,fullscreenActive:isPreviewFullscreen,encoding:options.encoding,
     showAs:format=>showFile(current,{format,encoding:options.encoding}),
     setEncoding:encoding=>showFile(current,{format:options.format,encoding}),
@@ -1183,13 +1263,15 @@ async function extractZip(entry) {
     title:'extractZip',message:'extractHint',field:'name',value:entry.name.slice(0,-4),submit:'extractZip',
   });
   if (folder===null) return;
+  const progress=taskProgress('zipExtractingProgress');
   try {
-    toast('zipExtracting',{name:entry.name});
-    await action({action:'extractZip',path:entry.path,destination:folder,version:entry.version});
+    await streamedOperation('/api/action',{action:'extractZip',path:entry.path,destination:folder,version:entry.version},progress);
+    progress.update('refreshing');
     expanded.add(parent(entry.path));
     await refresh();
     toast('zipExtracted',{name:folder});
   } catch (error) {tell(error);}
+  finally {progress.finish();}
 }
 async function changePath(entry,moving) {
   const original=entry.path;
@@ -1237,13 +1319,14 @@ async function deleteEntry(entry) {
     if (current && related(current.path)) closePreview(true);
     if (related(selected)) selected=parent(entry.path);
     await refresh();
-    toast('trashMoved',{name:entry.name},false,{id:item.id,label:'undo',icon:'restore',run:()=>changeTrash(item,'restore')});
+    toast('trashMoved',{name:entry.name},false,{id:item.id,label:'undo',icon:'restore',run:()=>withProgress($('toasts'),'restoringTrash',()=>changeTrash(item,'restore'))});
   } catch(e) {tell(e);}
 }
 
 async function deleteMarked() {
   if (bulkBusy || !marked.size) return;
   bulkBusy=true;
+  let progress;
   updateBulkActions();
   try {
     const entries=[...marked.values()].filter(entry=>{
@@ -1253,7 +1336,9 @@ async function deleteMarked() {
     const decision=current && entries.some(entry=>containsPath(entry.path,current.path))?await reviewEdits():'clean';
     if (!decision) return;
     if (!await promptDialog({title:'deleteManyQuestion',values:{count:entries.length},message:entries.some(entry=>entry.kind==='directory')?'deleteDirectory':'',submit:'delete',danger:true})) return;
-    let removed=0, firstError;
+    progress=taskProgress('deletingFiles');
+    progress.update('deletingFiles',0,entries.length,'count');
+    let removed=0, firstError, processed=0;
     for (let entry of entries) {
       try {
         if (decision==='saved' && current && containsPath(entry.path,current.path)) entry=await json(query('stat',entry.path));
@@ -1264,12 +1349,15 @@ async function deleteMarked() {
         if (containsPath(entry.path,selected)) selected=parent(entry.path);
         if (gridPath!==null && containsPath(entry.path,gridPath)) gridPath=parent(entry.path);
       } catch(error) {firstError??=error;}
+      progress.update('deletingFiles',++processed,entries.length,'count');
     }
+    progress.update('refreshing');
     await refresh();
     const failed=entries.length-removed;
     toast('bulkResult',{removed,failed},failed>0);
     if (firstError) tell(firstError);
   } finally {
+    progress?.finish();
     bulkBusy=false;
     renderTree();
   }
@@ -1296,10 +1384,10 @@ function rootSettings(signal) {
     check.disabled=save.disabled=input.disabled || input.value==='';
     restart.disabled=!loaded || busy;
   }
-  async function run(task) {
+  async function run(label,task) {
     busy=true;
     controls();
-    try {await task();}
+    try {await withProgress(section,label,task);}
     catch(error) {if (!signal.aborted) feedback(errorOf(error),true);}
     finally {busy=false;controls();}
   }
@@ -1308,20 +1396,20 @@ function rootSettings(signal) {
     status.classList.toggle('root-check-error',failed);
     status.classList.toggle('root-check-success',success);
   }
-  const check=makeButton('rootCheck','search',()=>run(async()=>{
-    feedback(t('rootChecking'));
+  const check=makeButton('rootCheck','search',()=>run('rootChecking',async()=>{
+    feedback('');
     await json('/api/settings/root/check',{method:'POST',body:{root:input.value},signal});
     feedback(t('rootVerified'),false,true);
   }),'button',true);
-  const save=makeButton('save','check',()=>run(async()=>{
+  const save=makeButton('save','check',()=>run('savingChanges',async()=>{
     const data=await json('/api/settings/root',{method:'PUT',body:{root:input.value}});
     input.value=data.root;
     feedback(t('rootSaved'));
   }),'button',true);
   const restart=makeButton('restartService','refresh',async()=>{
     if (!await reviewEdits() || !window.confirm(t('restartConfirm'))) return;
-    await run(async()=>{
-      feedback(t('updateRestarting'));
+    await run('updateRestarting',async()=>{
+      feedback('');
       await json('/api/settings/restart',{method:'POST'});
       await waitForRestart(status);
     });
@@ -1443,17 +1531,18 @@ function updateSettings(signal) {
     if (!nextPage || loadingVersions) return;
     loadingVersions=true;
     paintVersions();
+    const progress=startProgress(body,'loadingVersions');
     try {
       const data=await json('/api/updates/versions?page='+nextPage,{signal:signal});
       for (const tag of data.versions) releases.add(tag);
       nextPage=data.nextPage || 0;
     } catch(error) {
       if (!signal.aborted) feedback.textContent=errorOf(error);
-    } finally {loadingVersions=false;paintVersions();}
+    } finally {progress.finish();loadingVersions=false;paintVersions();}
   }
   async function changeMode(mode) {
     modes.disabled=true;
-    try {paint(await json('/api/updates',{method:'PUT',body:{mode}}));}
+    try {paint(await withProgress(body,'savingChanges',()=>json('/api/updates',{method:'PUT',body:{mode}})));}
     catch(error) {feedback.textContent=errorOf(error);paint(state);}
   }
   for (const [mode,key] of [['manual','updateManual'],['remind','updateRemind'],['auto','updateAuto']]) {
@@ -1468,13 +1557,14 @@ function updateSettings(signal) {
   modes.disabled=true;
   const check=makeButton('checkUpdates','refresh',async()=>{
     check.disabled=true;
-    feedback.textContent=t('checkingUpdates');
+    const progress=startProgress(body,'checkingUpdates');
+    feedback.textContent='';
     try {
       const data=await json('/api/updates/check',{method:'POST',signal:signal});
       paint(data);
       feedback.textContent=t(data.available?'updateAvailable':data.supported?'updateCurrent':'updateUnsupported',{version:data.latest});
     } catch(error) {if (!signal.aborted) feedback.textContent=errorOf(error);}
-    finally {check.disabled=false;}
+    finally {progress.finish();check.disabled=false;}
   },'button',true);
   const install=makeButton('updateInstall','download',async()=>{
     const version=choices.value;
@@ -1483,13 +1573,14 @@ function updateSettings(signal) {
     if (!await reviewEdits() || !window.confirm(t(older?'updateRollbackConfirm':'updateRestart',{version}))) return;
     installing=true;
     paintVersions();
-    feedback.textContent=t('updating');
+    feedback.textContent='';
+    const progress=startProgress(body,'updating');
     try {
-      await json('/api/updates/install',{method:'POST',body:{version}});
-      feedback.textContent=t('updateRestarting');
+      await streamedOperation('/api/updates/install',{version},progress);
+      progress.update('updateRestarting');
       await waitForRestart(feedback,version);
     } catch(error) {feedback.textContent=errorOf(error);}
-    finally {installing=false;paintVersions();}
+    finally {progress.finish();installing=false;paintVersions();}
   },'button',true);
   const moreVersions=makeButton('updateMoreVersions','down',loadVersions,'button',true);
   choices.onchange=()=>{install.disabled=!choices.value || installing;};
@@ -1592,6 +1683,7 @@ function cacheSettings(signal) {
     busy=true;
     paint();
     status.textContent='';
+    const progress=startProgress(body,route==='/api/cache/clear'?'cacheClearing':'savingChanges');
     try {
       const request=json(route,options);
       pendingCacheWrite=request;
@@ -1599,13 +1691,14 @@ function cacheSettings(signal) {
       if (route==='/api/cache/clear') {
         gridPreview?.abort();
         gridThumbnails.clear();
+        clearOriginalImages();
       }
       slider.value=String(snapshot.limitMiB);
       apply(data);
       status.textContent=t(message);
     } catch(error) {
       if (!signal.aborted) status.textContent=errorOf(error);
-    } finally {busy=false;paint();}
+    } finally {progress.finish();busy=false;paint();}
   }
   const save=makeButton('cacheSave','check',()=>change('/api/cache',{method:'PUT',body:{limitMiB:Number(slider.value)}},'cacheSaved'),'button',true);
   const clear=makeButton('clearCache','trash',()=>change('/api/cache/clear',{method:'POST'},'cacheCleared'),'button',true);
@@ -1680,7 +1773,7 @@ function accountSettings() {
   const logout=makeButton('logout','logout',async()=>{
     if (!await reviewEdits()) return;
     logout.disabled=true;
-    try {await json('/api/logout',{method:'POST'});showLogin();}
+    try {await withProgress(section,'processing',()=>json('/api/logout',{method:'POST'}));showLogin();}
     catch(error) {feedback.textContent=errorOf(error);}
     finally {logout.disabled=false;}
   },'button',true);
@@ -1855,6 +1948,7 @@ function listingState(list,key,values={}) {
   message.className='listing-state';
   message.textContent=t(key,values);
   list.replaceChildren(message);
+  if (key==='loading') startProgress(list,key,true);
 }
 
 function listingRow(entry,secondary) {
@@ -1899,15 +1993,16 @@ function openTrashPanel() {
     clear.disabled=true;
     list.inert=true;
     notice.hidden=false;
-    notice.textContent=t('trashClearing');
+    notice.textContent='';
+    const progress=startProgress(toolbar,'trashClearing');
     try {
-      const result=await json('/api/trash/clear',{method:'POST',body:{}});
+      const result=await streamedOperation('/api/trash/clear',{},progress,'count');
       if (!panel.open) return;
       notice.textContent=t(result.failed?'trashClearPartial':'trashCleared',{removed:result.removed,failed:result.failed});
       await update(true);
     } catch(error) {
       if (panel.open) notice.textContent=errorOf(error);
-    } finally {clear.disabled=false;list.inert=false;}
+    } finally {progress.finish();clear.disabled=false;list.inert=false;}
   },'button purge-button',true);
   clear.hidden=true;
   toolbar.append(clear);
@@ -1942,10 +2037,10 @@ function openTrashPanel() {
           const button=makeButton(action,glyph,async()=>{
             for (const control of commands.children) control.disabled=true;
             notice.hidden=true;
-            const updated=await changeTrash(item,action,error=>{
+            const updated=await withProgress(text,action==='restore'?'restoringTrash':'purgingTrash',()=>changeTrash(item,action,error=>{
               notice.textContent=errorOf(error);
               notice.hidden=false;
-            });
+            }));
             if (updated) await update();
             else for (const control of commands.children) control.disabled=false;
           },'button '+(action==='purge'?'purge-button':''),true);
@@ -2328,6 +2423,7 @@ $('login-form').onsubmit=async(e)=>{
   e.preventDefault();
   const form=e.currentTarget, submit=form.querySelector('button[type=submit]');
   submit.disabled=true;
+  const progress=startProgress(form,'signingIn');
   try {
     await json('/api/login',{method:'POST',body:Object.fromEntries(new FormData(form))});
     form.elements.password.value='';
@@ -2335,7 +2431,7 @@ $('login-form').onsubmit=async(e)=>{
   } catch(error) {
     loginError=error.error||'network';
     $('login-error').textContent=errorOf(error);
-  } finally {submit.disabled=false;}
+  } finally {progress.finish();submit.disabled=false;}
 };
 $('toggle-tree').onclick=()=>setDrawer(!workspace.classList.contains('drawer'));
 $('backdrop').onclick=()=>{setDrawer(false);$('toggle-tree').focus();};
