@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"image"
+	_ "image/gif"
 	"image/jpeg"
 	"image/png"
 	"io"
@@ -14,6 +15,9 @@ import (
 	"path"
 	"strconv"
 	"strings"
+
+	_ "golang.org/x/image/bmp"
+	_ "golang.org/x/image/webp"
 )
 
 const minThumbnailSource = 1 << 20
@@ -49,7 +53,12 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 	}
 	defer f.Close()
 	ext := strings.ToLower(path.Ext(name))
-	if (ext != ".jpg" && ext != ".jpeg" && ext != ".png") || (edge != 240 && info.Size() < minThumbnailSource) || info.Size() > 96<<20 {
+	switch ext {
+	case ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp":
+	default:
+		return failure(415, "unsupported")
+	}
+	if (edge != 240 && info.Size() < minThumbnailSource) || info.Size() > 96<<20 {
 		return failure(415, "unsupported")
 	}
 	key := thumbnailKey{name, version(info), edge}
@@ -74,7 +83,7 @@ func (t *thumbnails) serve(s *fileStore, w http.ResponseWriter, r *http.Request)
 		result = t.cache.image(key)
 		if result.data == nil {
 			_, generation := t.cache.budget()
-			result, err = makeThumbnail(r.Context(), f, ext == ".png", edge)
+			result, err = makeThumbnail(r.Context(), f, ext == ".jpg" || ext == ".jpeg", edge)
 			if err != nil {
 				return err
 			}
@@ -109,21 +118,17 @@ func (r contextImageReader) Read(p []byte) (int, error) {
 	return r.Reader.Read(p)
 }
 
-func makeThumbnail(ctx context.Context, input io.ReadSeeker, isPNG bool, edge int) (thumbnail, error) {
+func makeThumbnail(ctx context.Context, input io.ReadSeeker, isJPEG bool, edge int) (thumbnail, error) {
 	var output thumbnail
-	config := jpeg.DecodeConfig
-	decode := jpeg.Decode
 	orientation := 1
-	if isPNG {
-		config, decode = png.DecodeConfig, png.Decode
-	} else {
+	if isJPEG {
 		orientation = jpegOrientation(input)
 		if _, err := input.Seek(0, io.SeekStart); err != nil {
 			return output, err
 		}
 	}
 	reader := contextImageReader{ctx, input}
-	dim, err := config(reader)
+	dim, _, err := image.DecodeConfig(reader)
 	if err != nil || dim.Width < 1 || dim.Height < 1 || int64(dim.Width)*int64(dim.Height) > 50_000_000 ||
 		max(dim.Width, dim.Height) <= edge {
 		return output, failure(415, "unsupported")
@@ -131,7 +136,7 @@ func makeThumbnail(ctx context.Context, input io.ReadSeeker, isPNG bool, edge in
 	if _, err := input.Seek(0, io.SeekStart); err != nil {
 		return output, err
 	}
-	source, err := decode(reader)
+	source, _, err := image.Decode(reader)
 	if err != nil {
 		return output, failure(415, "unsupported")
 	}
@@ -153,7 +158,7 @@ func makeThumbnail(ctx context.Context, input io.ReadSeeker, isPNG bool, edge in
 	}
 	var buffer bytes.Buffer
 	contentType := "image/jpeg"
-	if isPNG && !dest.Opaque() {
+	if !dest.Opaque() {
 		contentType = "image/png"
 		err = (&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(&buffer, dest)
 	} else {

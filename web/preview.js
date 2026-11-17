@@ -31,6 +31,18 @@ export function fileType(entry) {
   if (text.has(ext)||['readme','license','changelog','authors','notice'].includes(ext)) return {style:'text',icon:'text',ext};
   return {style:'file',icon:'file',ext};
 }
+// Classification is separate from preview support (e.g. legacy Word files).
+export function formatCategory(entry) {
+  if (entry.kind==='directory') return 'folder';
+  if (entry.kind!=='file') return 'file';
+  const {style,ext}=fileType(entry);
+  if (['doc','docm','dot','dotx','dotm','rtf','odt'].includes(ext)) return 'doc';
+  if (['xls','xlsm','xlsb','xlt','xltx','ods','tsv'].includes(ext)) return 'sheet';
+  if (['ppt','pptm','pps','ppsx','odp'].includes(ext)) return 'slides';
+  if (['aif','aiff','caf','wma','amr','ape','alac','mid','midi'].includes(ext)) return 'audio';
+  if (['ico','psd','raw','cr2','cr3','nef','arw','jxl'].includes(ext)) return 'image';
+  return style==='code'?'text':style;
+}
 const node = (tag,cls='') => Object.assign(document.createElement(tag),{className:cls});
 const clamp = (value,min,max) => Math.max(min,Math.min(max,value));
 const scripts=new Map();
@@ -81,7 +93,7 @@ function media(ctx,isVideo,fallback) {
   let mode='fit', zoom=1, x=0, y=0, naturalWidth=0, naturalHeight=0, previousPinch;
   let attemptedFallback=false, disposed=false, frame=0, bufferTimer;
   let stageWidth=0,stageHeight=0,layoutScale=0;
-  const useThumbnail=!isVideo && ['jpg','jpeg','png'].includes(ctx.type.ext) && ctx.entry.size>=1024*1024;
+  const useThumbnail=!isVideo && ['jpg','jpeg','png','webp','gif','bmp'].includes(ctx.type.ext) && ctx.entry.size>=256*1024;
   const previewRequest=useThumbnail?new AbortController():null;
   let thumbnailURL='', originalURL='', thumbnailSize, original, originalRequested=false, originalBlob;
   const originalStatus=node('div','media-conversion original-status');
@@ -227,26 +239,22 @@ function media(ctx,isVideo,fallback) {
     } catch(error) {
       if (disposed || ctx.signal.aborted) return;
       if (image===object && error?.error) ctx.report(error.error);
-      else image.onerror?.();
+      else image.onerror?.(error);
     }
   }
   function requestOriginal() {
     if (!useThumbnail || originalRequested || disposed) return;
     originalRequested=true;
-    previewRequest.abort();
-    if (!thumbnailSize || !naturalWidth) {
-      dropThumbnail();
-      loadOriginal(object);
-      return;
-    }
     const image=node('img','media-object');
     image.alt=ctx.entry.name;
     image.decoding='async';
     image.fetchPriority='high';
     image.draggable=false;
     original=image;
-    image.onload=()=>{
+    image.onload=async()=>{
+      try {await image.decode();} catch {image.onerror?.();return;}
       if (disposed) return;
+      previewRequest.abort();
       const small=object;
       object=image;
       dimensions(image.naturalWidth,image.naturalHeight);
@@ -256,29 +264,31 @@ function media(ctx,isVideo,fallback) {
       dropThumbnail();
       frameReady();
     };
-    image.onerror=()=>{
+    image.onerror=(error)=>{
       if (disposed) return;
       if (originalURL) URL.revokeObjectURL(originalURL);
       originalURL='';
       original=null;
       originalRequested=false;
       frameReady();
-      ctx.notify({error:'originalError'});
+      if (thumbnailURL) ctx.notify({error:'originalError'});
+      else {
+        previewRequest.abort();
+        if (error?.error) ctx.report(error.error);
+        else object.onerror?.();
+      }
     };
     loadOriginal(image);
   }
   async function loadThumbnail() {
     try {
-      const edge=innerWidth<780?800:innerWidth>1900?1600:1280;
-      const asset=await ctx.thumbnail(edge,previewRequest.signal);
+      const asset=await ctx.thumbnail(240,previewRequest.signal);
       if (disposed || previewRequest.signal.aborted) return;
       thumbnailSize=asset;
       thumbnailURL=URL.createObjectURL(asset.blob);
       object.src=thumbnailURL;
-    } catch(error) {
-      if (disposed || previewRequest.signal.aborted) return;
-      if (['permission','protected','missing','boundary','unauthenticated'].includes(error?.error)) ctx.report(error.error);
-      else requestOriginal();
+    } catch {
+      // The original request already runs independently and reports any errors.
     }
   }
   const time=(s)=>{
@@ -366,7 +376,8 @@ function media(ctx,isVideo,fallback) {
     object.draggable=false;
     object.onload=()=>{
       dimensions(thumbnailSize?.width || object.naturalWidth,thumbnailSize?.height || object.naturalHeight);
-      frameReady();
+      if (thumbnailSize && originalRequested) loading(false);
+      else frameReady();
     };
   }
   const resize=new ResizeObserver(([entry])=>{
@@ -421,9 +432,9 @@ function media(ctx,isVideo,fallback) {
   }
   object.onerror=async()=>{
     if (ctx.signal.aborted || disposed || conversion.isConnected) return;
-    if (thumbnailURL && !originalRequested) {
+    if (thumbnailURL) {
       dropThumbnail();
-      requestOriginal();
+      if (!originalRequested) requestOriginal();
       return;
     }
     let error='mediaError';
@@ -464,8 +475,10 @@ function media(ctx,isVideo,fallback) {
   };
   ctx.host.replaceChildren(view);
   zoomMode(mode);
-  if (useThumbnail && fullscreen) requestOriginal();
-  else if (useThumbnail) loadThumbnail();
+  if (useThumbnail) {
+    loadThumbnail();
+    requestOriginal();
+  }
   else if (isVideo || ctx.type.ext==='svg') object.src=ctx.url;
   else loadOriginal(object);
   return {destroy,fullscreenChanged(active){

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#edf3fc">
 <title>服务器文件管理器</title>
 <script src="/theme.js"></script>
@@ -16,6 +16,19 @@
   <button class="icon-button mobile-toggle" id="toggle-tree" data-label="explorer" aria-controls="explorer" aria-expanded="false"></button>
   <div class="brand"><span id="brand-icon" class="brand-icon"></span><strong data-i18n="title"></strong></div>
   <div class="top-actions">
+    <select id="format-filter" class="format-filter" data-label="formatFilter" hidden>
+      <option value="" data-i18n="formatAll"></option>
+      <option value="doc" data-i18n="formatWord"></option>
+      <option value="sheet" data-i18n="formatExcel"></option>
+      <option value="image" data-i18n="formatImages"></option>
+      <option value="pdf" data-i18n="formatPDF"></option>
+      <option value="video" data-i18n="formatVideos"></option>
+      <option value="audio" data-i18n="formatAudio"></option>
+      <option value="slides" data-i18n="formatSlides"></option>
+      <option value="text" data-i18n="formatText"></option>
+      <option value="archive" data-i18n="formatArchives"></option>
+      <option value="file" data-i18n="formatOther"></option>
+    </select>
     <button id="settings" class="icon-button" type="button" data-label="settings" hidden></button>
   </div>
 </header>
@@ -53,6 +66,7 @@
         <button id="more" class="icon-button more" data-label="more" aria-haspopup="menu"></button>
       </div>
     </header>
+    <button id="mobile-fullscreen-exit" type="button" class="icon-button" data-label="exitFullscreen"></button>
     <div id="preview-host" class="preview-host"></div>
   </section>
   <div id="upload-panel" class="upload-panel" hidden></div>

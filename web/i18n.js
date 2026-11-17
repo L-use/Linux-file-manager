@@ -1,4 +1,9 @@
 const strings = {
+ formatFilter:['按文件格式筛选','Filter by file format'], formatAll:['全部格式','All formats'],
+ formatWord:['Word 文档','Word documents'], formatExcel:['Excel / CSV','Excel / CSV'],
+ formatImages:['图片','Images'], formatPDF:['PDF','PDF'], formatVideos:['视频','Videos'], formatAudio:['音频','Audio'],
+ formatSlides:['演示文稿','Presentations'], formatText:['文本与代码','Text & code'],
+ formatArchives:['压缩包','Archives'], formatOther:['其他','Other'],
  fillScreen:['铺满屏幕','Fill screen'],
 
  settingsAppearance:['外观与语言','Appearance & language'], settingsTheme:['主题','Theme'], settingsLanguage:['界面语言','Interface language'],

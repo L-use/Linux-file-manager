@@ -128,7 +128,7 @@ func TestThumbnailReportsOriginalOrientation(t *testing.T) {
 	exif := []byte{'E', 'x', 'i', 'f', 0, 0, 'I', 'I', 42, 0, 8, 0, 0, 0, 1, 0,
 		0x12, 1, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0}
 	source := append(append([]byte{0xff, 0xd8, 0xff, 0xe1, 0, byte(len(exif) + 2)}, exif...), raw.Bytes()[2:]...)
-	result, err := makeThumbnail(context.Background(), bytes.NewReader(source), false, 800)
+	result, err := makeThumbnail(context.Background(), bytes.NewReader(source), true, 800)
 	if err != nil {
 		t.Fatal(err)
 	}

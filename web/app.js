@@ -1,12 +1,16 @@
 import {icon} from './icons.js';
 import {language, setLanguage, t, translate} from './i18n.js';
-import {mountPreview, fileType, mountGridThumbnails} from './preview.js';
+import {mountPreview, fileType, formatCategory, mountGridThumbnails} from './preview.js';
 import {createServerStatus} from './server-status.js';
 
 const $ = (id) => document.getElementById(id);
 const tree = $('tree'), workspace = $('workspace'), search = $('search'), menu = $('menu'), dialog = $('dialog');
 const cache = new Map(), expanded = new Set(['']), directoryErrors = new Map();
 const editorPane=$('editor');
+const mobileLayout=matchMedia('(max-width:690px), (max-height:500px) and (pointer:coarse)');
+let viewportFullscreen=false;
+const formatFilter=$('format-filter');
+const matchesFormat=entry=>!formatFilter.value || entry.kind==='directory' || formatCategory(entry)===formatFilter.value;
 let hiddenFolders=new Set(), showHidden=false;
 const treeSortModes={
   sortName:['name','sort',1],
@@ -183,12 +187,12 @@ function moveHiddenPaths(source,destination) {
   if (changed) saveVisibility();
 }
 
-const isPreviewFullscreen=()=>(document.fullscreenElement || document.webkitFullscreenElement)===editorPane;
+const isPreviewFullscreen=()=>viewportFullscreen || (document.fullscreenElement || document.webkitFullscreenElement)===editorPane;
 let previewMoving=false;
 function previewNeighbors() {
   if (!current) return [];
   const entries=orderChildren((cache.get(parent(current.path))||[]).filter(entry=>
-    entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && fileType(entry).style!=='file')));
+    entry.path===current.path || (entry.kind==='file' && isVisiblePath(entry.path) && matchesFormat(entry) && fileType(entry).style!=='file')));
   const at=entries.findIndex(entry=>entry.path===current.path);
   return at<0?[]:[entries[at-1],entries[at+1]];
 }
@@ -213,6 +217,12 @@ async function navigatePreview(direction,focusTree=false) {
 }
 function leavePreviewFullscreen() {
   if (!isPreviewFullscreen()) return;
+  if (viewportFullscreen) {
+    viewportFullscreen=false;
+    editorPane.classList.remove('viewport-fullscreen');
+    fullscreenChanged();
+    return;
+  }
   const exit=document.exitFullscreen || document.webkitExitFullscreen;
   if (exit) Promise.resolve(exit.call(document)).catch(()=>{});
 }
@@ -224,7 +234,13 @@ async function fullscreenPreview() {
     if (!request) throw new Error('Fullscreen is unavailable');
     await request.call(editorPane);
   } catch {
-    toast('fullscreenUnavailable',{},true);
+    if (!mobileLayout.matches && !matchMedia('(pointer:coarse)').matches) {
+      toast('fullscreenUnavailable',{},true);
+      return;
+    }
+    viewportFullscreen=true;
+    editorPane.classList.add('viewport-fullscreen');
+    fullscreenChanged();
   }
 }
 
@@ -232,11 +248,17 @@ function setDrawer(open) {
   workspace.classList.toggle('drawer',open);
   $('toggle-tree').setAttribute('aria-expanded',String(open));
   $('backdrop').hidden=!open;
-  if (open) search.focus();
+  if (open) {
+    (tree.querySelector('.selected .tree-main') || tree.querySelector('.tree-main') || $('toggle-tree')).focus({preventScroll:true});
+  } else if (mobileLayout.matches && $('explorer').contains(document.activeElement)) {
+    $('toggle-tree').focus({preventScroll:true});
+  }
 }
 
 function showLogin(error='') {
   signedIn=false;
+  formatFilter.hidden=true;
+  formatFilter.value='';
   gridPath=null;
   gridPreview?.abort();
   gridThumbnails.clear();
@@ -279,6 +301,7 @@ function showLogin(error='') {
 }
 async function showWorkspace(session) {
   signedIn=true;
+  formatFilter.hidden=false;
   root=session.root;
   loadVisibility();
   $('login-screen').hidden=true;
@@ -352,7 +375,7 @@ function renderTree(focusPath) {
   const filter=search.value.trim().toLocaleLowerCase();
   const matchMemo=new Map();
   function matches(entry) {
-    if (!isVisiblePath(entry.path)) return false;
+    if (!isVisiblePath(entry.path) || !matchesFormat(entry)) return false;
     if (!filter) return true;
     if (!matchMemo.has(entry.path)) matchMemo.set(entry.path,entry.name.toLocaleLowerCase().includes(filter) || (cache.get(entry.path)||[]).some(matches));
     return matchMemo.get(entry.path);
@@ -408,8 +431,11 @@ function renderTree(focusPath) {
     const children=cache.get(entry.path)?.filter(child=>isVisiblePath(child.path));
     if (directoryErrors.has(entry.path)) fragment.append(directoryNote(directoryErrors.get(entry.path),depth+1));
     else if (!children) fragment.append(directoryNote('loading',depth+1));
-    else if (!children.length && !filter) fragment.append(directoryNote('emptyFolder',depth+1));
-    else orderChildren(children.filter(matches)).forEach(child=>row(child,depth+1));
+    else {
+      const matching=children.filter(matches);
+      if (!matching.length && !filter) fragment.append(directoryNote(children.length?'noMatches':'emptyFolder',depth+1));
+      else orderChildren(matching).forEach(child=>row(child,depth+1));
+    }
   }
   row(rootEntry(),0,true);
   if (filter && cache.has('') && !cache.get('').some(matches)) fragment.append(directoryNote('noMatches',1));
@@ -522,7 +548,7 @@ function renderGrid() {
   grid.className='file-grid';
   const tiles=new Map(), previews=[];
   const filter=search.value.trim().toLocaleLowerCase();
-  for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && item.name.toLocaleLowerCase().includes(filter)))) {
+  for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && matchesFormat(item) && item.name.toLocaleLowerCase().includes(filter)))) {
     const tile=document.createElement('div');
     tile.className='file-tile';
     const type=fileType(entry);
@@ -545,7 +571,7 @@ function renderGrid() {
     tiles.set(tile,entry);
     grid.append(tile);
   }
-  if (!grid.children.length) grid.append(directoryNote(filter?'noMatches':'emptyFolder',0));
+  if (!grid.children.length) grid.append(directoryNote(filter || formatFilter.value?'noMatches':'emptyFolder',0));
   else gridDragSelection(grid,tiles);
   host.replaceChildren(headline,grid);
   grid.scrollTop=prior;
@@ -581,7 +607,7 @@ async function toggleDirectory(entry) {
 }
 async function locate(path) {
   if (!isVisiblePath(path)) revealHidden(true);
-  if (matchMedia('(max-width:690px)').matches) setDrawer(true);
+  if (mobileLayout.matches) setDrawer(true);
   search.value='';
   const parts=path?path.split('/'):[];
   let prefix='';
@@ -2262,6 +2288,11 @@ $('search-deep').onclick=openSearchPanel;
 $('download').insertAdjacentHTML('afterbegin',icon('download'));
 $('preview-fullscreen').innerHTML=icon('fullscreen');
 $('preview-fullscreen').onclick=fullscreenPreview;
+$('mobile-fullscreen-exit').innerHTML=icon('close');
+$('mobile-fullscreen-exit').onclick=()=>{
+  leavePreviewFullscreen();
+  $('preview-fullscreen').focus({preventScroll:true});
+};
 $('show-hidden').onclick=()=>revealHidden(!showHidden);
 updateHiddenButton();
 function fullscreenChanged() {
@@ -2358,6 +2389,11 @@ $('select-many').onclick=()=>{
 $('bulk-delete').onclick=deleteMarked;
 $('more').onclick=()=>{if (current) itemMenu(current,$('more'));};
 search.oninput=()=>renderTree();
+formatFilter.onchange=()=>{
+  // A bulk operation should never retain files filtered out by this control.
+  for (const [path,entry] of marked) if (!matchesFormat(entry)) marked.delete(path);
+  renderTree();
+};
 document.addEventListener('pointerdown',(e)=>{if (popup && !menu.contains(e.target) && !popup.anchor.contains(e.target)) closeMenu(false);});
 document.addEventListener('keydown',(e)=>{
   const fullscreen=isPreviewFullscreen();
