@@ -598,3 +598,17 @@ a.button:visited{color:inherit}
 .workspace.sidebar-collapsed>.explorer,.workspace.sidebar-collapsed>.divider{display:none}
 .workspace.sidebar-collapsed>.editor{grid-row:1;margin-left:8px}
 .workspace.sidebar-collapsed>.upload-panel{grid-column:3;margin:7px 8px 0}
+.directory-view .filebar{display:none}
+.grid-head{display:flex;align-items:center;min-height:44px}
+.view-switch{margin-left:auto;min-width:44px;font-size:23px}
+.detail-list{display:block!important;overflow:auto}
+.detail-headers{display:grid;grid-template-columns:minmax(180px,1fr) 110px 140px 220px;position:sticky;top:0;z-index:2;background:var(--sidebar,#122019);border-bottom:1px solid #375640}
+.detail-headers button{background:transparent;color:inherit;border:0;text-align:left;padding:14px;cursor:pointer;font:inherit}
+.detail-list .file-tile{position:relative;border:0;border-radius:6px;margin:0;min-width:650px}
+.detail-list .file-tile:nth-child(odd){background:rgba(120,150,135,.07)}
+.detail-list .tile-open{display:grid;grid-template-columns:28px minmax(150px,1fr) 110px 140px 220px;align-items:center;gap:0;padding:12px 14px;width:100%;text-align:left}
+.detail-list .tile-preview{width:23px;height:23px;min-height:0;background:none;border-radius:0}
+.detail-list .tile-preview svg{width:22px;height:22px}
+.detail-cell{font-size:13px;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.detail-list .tile-more{display:none}
+.statusbar{gap:20px}.server-summary{gap:24px}

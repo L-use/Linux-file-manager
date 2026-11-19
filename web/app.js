@@ -623,8 +623,11 @@ function rememberGridScroll() {
   if (grid) gridScrollPositions.set(grid.dataset.path,grid.scrollTop);
 }
 
+let detailView=localStorage.getItem('fm-detail-view')==='true';
+let detailSort='name', detailDirection=1;
 function renderGrid() {
   if (gridPath===null || current) return;
+  editorPane.classList.add('directory-view');
   updateGridButton();
   gridPreview?.abort();
   gridPreview=new AbortController();
@@ -642,13 +645,28 @@ function renderGrid() {
   location.className='truncate';
   location.textContent=location.title=absolute(gridPath);
   headline.append(location);
+  const view=document.createElement('button');
+  view.className='button view-switch';
+  view.textContent=detailView?'▦':'☷';
+  view.title=language==='zh'?'切换视图':'Switch view';
+  view.onclick=()=>{detailView=!detailView;localStorage.setItem('fm-detail-view',detailView);renderGrid();};
+  headline.append(view);
   if (gridPath) headline.prepend(makeButton('parentFolder','chevron',()=>openGrid(parent(gridPath))));
   const grid=document.createElement('div');
-  grid.className='file-grid';
+  grid.className=detailView?'file-grid detail-list':'file-grid';
   grid.dataset.path=gridPath;
   const tiles=new Map(), previews=[];
   const filter=search.value.trim().toLocaleLowerCase();
-  for (const entry of orderChildren(entries.filter(item=>isVisiblePath(item.path) && matchesFormat(item) && item.name.toLocaleLowerCase().includes(filter)))) {
+  if(detailView){
+    const headers=document.createElement('div');headers.className='detail-headers';
+    for(const [key,zh,en] of [['name','名称','Name'],['size','大小','Size'],['kind','类型','Kind'],['modified','修改日期','Modified']]){
+      const button=document.createElement('button');button.textContent=(language==='zh'?zh:en)+(detailSort===key?(detailDirection===1?' ↑':' ↓'):'');
+      button.onclick=()=>{detailDirection=detailSort===key?-detailDirection:1;detailSort=key;renderGrid();};headers.append(button);
+    }grid.append(headers);
+  }
+  const listed=orderChildren(entries.filter(item=>isVisiblePath(item.path) && matchesFormat(item) && item.name.toLocaleLowerCase().includes(filter)));
+  if(detailView)listed.sort((a,b)=>Number(b.kind==='directory')-Number(a.kind==='directory') || detailDirection*(typeof a[detailSort]==='number'?a[detailSort]-b[detailSort]:treeNames.compare(a[detailSort],b[detailSort])));
+  for (const entry of listed) {
     const tile=document.createElement('div');
     tile.className='file-tile';
     const type=fileType(entry);
@@ -660,11 +678,12 @@ function renderGrid() {
     const preview=document.createElement('span');
     preview.className='tile-preview type-'+type.style;
     preview.innerHTML=icon(type.icon);
-    if (entry.kind==='file' && type.style!=='file') previews.push({entry,type,element:preview});
+    if (!detailView && entry.kind==='file' && type.style!=='file') previews.push({entry,type,element:preview});
     const name=document.createElement('span');
     name.className='truncate';
     name.textContent=entry.name;
     button.append(preview,name);
+    if(detailView){for(const value of [entry.kind==='directory'?'—':size(entry.size),entry.kind==='directory'?(language==='zh'?'文件夹':'Folder'):(entry.name.split('.').pop().toUpperCase()),new Date(entry.modified).toLocaleString()]){const cell=document.createElement('span');cell.className='detail-cell';cell.textContent=value;button.append(cell);}}
     button.onclick=()=>entry.kind==='directory'?openGrid(entry.path):showFile(entry,{fromGrid:true});
     tile.append(button,makeButton('more','more',event=>itemMenu(entry,event.currentTarget),'icon-button tile-more'));
     if (selecting) tile.append(selectionCheckbox(entry));
@@ -836,6 +855,7 @@ function setEmpty(title, description='', entry=null, loading=false) {
 }
 
 function renderHeader() {
+  editorPane.classList.toggle('directory-view',!current);
   const tab=$('tab'), trail=$('breadcrumb');
   tab.replaceChildren();
   tab.hidden=!current;
