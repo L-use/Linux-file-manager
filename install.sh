@@ -121,7 +121,12 @@ case "$lang" in zh|en) ;; *) fail "Use --lang zh or --lang en." "请使用 --lan
 
 case "$(uname -s)" in
  Linux) platform=linux ;;
- Darwin) platform=darwin; [ "$(id -u)" -eq 0 ] || user_install=true ;;
+ Darwin)
+   platform=darwin
+   mac_version=$(/usr/bin/sw_vers -productVersion)
+   mac_major=${mac_version%%.*}
+   [ "$mac_major" -ge 13 ] || fail "macOS 13 or newer is required (found $mac_version)." "需要 macOS 13 或以上版本（当前 $mac_version）。"
+   [ "$(id -u)" -eq 0 ] || user_install=true ;;
  *) fail "Supported systems: Linux and macOS." "支持 Linux 和 macOS。" ;;
 esac
 case "$(uname -m)" in
