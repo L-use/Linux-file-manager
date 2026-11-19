@@ -612,3 +612,30 @@ a.button:visited{color:inherit}
 .detail-cell{font-size:13px;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .detail-list .tile-more{display:none}
 .statusbar{gap:20px}.server-summary{gap:24px}
+/* Directory toolbar and list colors share both theme palettes. */
+.detail-headers{background:var(--glass);color:var(--ink);border-color:var(--line);backdrop-filter:blur(18px)}
+.directory-view>.tabbar{position:absolute;height:3px;min-height:0;inset:0 0 auto;z-index:4;border:0;padding:0;background:transparent}
+.directory-view{position:relative}
+.directory-view>.preview-host{padding:0 12px 12px}
+.directory-view .grid-head{flex:none;height:49px;min-height:49px;margin:0;padding:0 8px;gap:8px}
+.directory-view .grid-head strong{font-size:13px;font-weight:500}
+.view-switch{display:flex;align-items:center;gap:12px;font-size:20px;min-height:30px;padding:4px 9px}
+.view-switch[data-view=list]>span,.view-switch[data-view=grid]>svg{color:var(--blue)}
+.explorer-bar{flex-direction:column;align-items:stretch;padding:0 7px 8px;gap:0}
+.explorer-bar>strong{height:49px;display:flex;align-items:center;padding-left:6px}
+.explorer-tools{justify-content:space-around;border:1px solid var(--line);border-radius:8px;padding:7px 2px;gap:0}
+.explorer-tools .icon-button{width:auto;flex:1;min-width:0;height:auto;min-height:42px;display:flex;flex-direction:column;gap:5px;font-size:10px;padding:3px 1px}
+.explorer-tools .icon-button::after{content:attr(aria-label);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.statusbar{margin:0 8px 5px;border:1px solid var(--line);border-radius:8px;min-height:34px;padding:3px 12px;background:var(--glass);gap:18px}
+.server-summary{flex:1;justify-content:space-around;gap:12px}
+.server-summary>span{border-left:1px solid var(--line);padding-left:18px;display:flex;align-items:center;gap:8px}
+.server-summary>span::before{font-size:17px;color:var(--blue)}
+#live-network::before{content:'⇄'}
+#live-memory::before{content:'▤'}
+#live-disk::before{content:'▱'}
+#live-uptime::before{content:'◷'}
+@media(max-width:900px){.server-summary{justify-content:flex-start;overflow-x:auto}.server-summary>span{padding-left:8px}.statusbar{gap:8px}}
+.directory-view .grid-head{height:112px;min-height:112px;align-items:flex-end;padding-bottom:14px}
+.detail-headers{min-width:650px;grid-template-columns:minmax(178px,1fr) 110px 140px 220px;padding-right:14px}
+.directory-view .grid-head{height:107px;min-height:107px;padding-bottom:14px}
+@media(max-width:690px){.directory-view .grid-head{height:49px;min-height:49px;align-items:center;padding-bottom:0}.statusbar{margin:0;max-width:100%;padding-inline:6px}.server-summary{min-width:0}}

@@ -647,7 +647,8 @@ function renderGrid() {
   headline.append(location);
   const view=document.createElement('button');
   view.className='button view-switch';
-  view.textContent=detailView?'▦':'☷';
+  view.innerHTML=icon('grid')+'<span aria-hidden="true">☷</span>';
+  view.dataset.view=detailView?'list':'grid';
   view.title=language==='zh'?'切换视图':'Switch view';
   view.onclick=()=>{detailView=!detailView;localStorage.setItem('fm-detail-view',detailView);renderGrid();};
   headline.append(view);

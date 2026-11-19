@@ -53,7 +53,7 @@ export function createServerStatus(read,size) {
       const usage=snapshot?.[key];
       const fraction=usage?.total?Math.min(1,usage.used/usage.total):null;
       const formatted=fraction===null?'—':number.format(fraction);
-      updateText(byId('live-'+key),t(label)+' '+formatted);
+      updateText(byId('live-'+key),t(label)+' '+(usage?size(usage.used)+' / '+size(usage.total)+' ('+formatted+')':formatted));
       if (!overlay.hidden) {
         const inner=byId('overlay-'+key);
         updateText(inner,formatted);
