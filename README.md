@@ -16,6 +16,14 @@
 
 Linux File Manager supports Linux and macOS (Apple silicon and Intel) from one source tree and lets you browse and manage existing directories from your browser. The Go executable embeds the web interface, fonts, icons, document readers, and PDF worker, so the application can run offline.
 
+### Favorites, downloads and search
+
+- Save folders with the star action in their context menu. Favorites appear below the explorer search box, are stored privately on the server, survive restarts, and are separated by management root. On phones, open the explorer drawer to access them.
+- Folder menus offer Download as ZIP. Multi-select provides a ZIP download button. Empty folders and Unicode names are preserved. ZIPs are generated incrementally into temporary disk storage before download; source read errors appear before a download is published. Symbolic links and special files are rejected explicitly, and application-private paths are excluded.
+- In desktop Chrome/Edge, drag a normal file out to download it; drag a folder or a selected group to download ZIP. This uses Chromium's non-standard DownloadURL mechanism; browser/desktop combinations may differ. Other browsers can use the download menu. Server originals remain in place.
+- Normal mode: drag an item to export, drag empty space to marquee-select. Multi-select mode: drag selected items to export the whole group; drag unselected items or empty space to marquee-select. Each gesture keeps its original purpose. Touch devices retain scrolling and checkbox selection instead of desktop drag-out.
+- Enter a name in the explorer search box and press Enter (or use its search button) to search recursively from the configured management root, regardless of the selected folder. Unreadable/private paths are skipped. Large searches can show a clearly marked partial result; narrow the search when prompted. Closing the search panel cancels its request.
+
 ### Quick online installation
 
 Run this on Linux or macOS. The installer automatically selects the latest release for your operating system and CPU architecture. On macOS it defaults to a current-user installation and registers a launchd agent; it runs after login. Root installations use a LaunchDaemon. macOS 13 or newer is required.
@@ -147,6 +155,14 @@ The source is licensed under the [MIT License](LICENSE). Bundled components reta
 ## 简体中文
 
 在浏览器中登录，浏览和管理 Linux 服务器现有目录。Go 程序内嵌前端、字体、图标、文档解析器和 PDF worker，可以在隔离网络中运行。
+
+### 收藏、下载与搜索
+
+- 文件夹右键菜单的星号可添加或取消收藏。收藏夹位于搜索框下方，记录保存在服务器私有状态目录，重启后保留，并按管理根目录区分；手机打开侧栏抽屉即可访问。
+- 文件夹和多个选中项目可打包下载为 ZIP，保留空文件夹和中文名称。压缩内容逐段写入临时磁盘文件，完成后交给浏览器下载，避免整包占用内存，并在下载前提示读取失败。符号链接和特殊文件会明确报错，程序私有文件不会包含在 ZIP 中。
+- 桌面 Chrome/Edge 可拖出下载：普通文件下载原文件，文件夹或多个选中项目下载 ZIP。此功能使用 Chromium 非标准 DownloadURL，具体支持程度取决于浏览器和桌面系统；其他浏览器可使用菜单下载。服务器原文件保留。
+- 普通模式拖项目用于导出、拖空白处用于框选；多选模式拖已选项目导出整组，拖未选项目或空白处用于框选。一次手势不会中途切换用途；手机保留滚动和勾选，不启用桌面拖出。
+- 搜索框输入名称后按 Enter 或点击搜索按钮，默认递归搜索整个配置的管理根目录，不受当前子目录影响。不可读和私有路径会跳过；大目录达到搜索限制时会明确提示结果不完整。关闭搜索面板可取消请求。
 
 ### 在线快速安装
 

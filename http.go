@@ -123,6 +123,12 @@ func routes(a *authStore, s *fileStore, trash *trashStore, videos *videoPreviews
 			}
 		})
 	}
+	registerFolderDownloads(func(pattern string, private bool, handler func(http.ResponseWriter, *http.Request) error) {
+		register(pattern, private, handler)
+	}, s, videos.state)
+	registerFavorites(func(pattern string, private bool, handler func(http.ResponseWriter, *http.Request) error) {
+		register(pattern, private, handler)
+	}, s, videos.state)
 	register("POST /api/login", false, a.login)
 	register("POST /api/logout", true, a.logout)
 	register("GET /api/session", true, func(w http.ResponseWriter, r *http.Request) error {

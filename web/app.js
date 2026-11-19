@@ -27,6 +27,7 @@ try {
 let root = '', selected = '', current = null, activePreview = null, previewId = 0, generation = 0;
 let sessionUser='', loginError = '', uploadState = null, uploadResult = null, popup = null, modal = null, signedIn = false;
 let gridPath=null, selecting=false, bulkBusy=false, gridPreview;
+let marqueeActive=false;
 const gridThumbnails=new Map();
 const gridScrollPositions=new Map();
 let returnTile=null;
@@ -149,13 +150,48 @@ function sampleRate(meter,bytes) {
   meter.bytes=bytes;
 }
 const newMeter=()=>({time:performance.now(),bytes:0,rate:0});
+let favorites=[];
+const exportDesktop=matchMedia('(hover:hover) and (pointer:fine)');
+exportDesktop.addEventListener('change',()=>updateBulkActions());
+const favoriteSection=$('favorites');
+$('favorites-star').innerHTML=icon('star');
+try {favoriteSection.open=localStorage.getItem('fm-favorites-open')==='true';} catch {}
+favoriteSection.ontoggle=()=>{try{localStorage.setItem('fm-favorites-open',favoriteSection.open);}catch{}};
+function renderFavorites(){
+ const list=$('favorites-list');list.replaceChildren();$('favorites-count').textContent=favorites.length?String(favorites.length):'';
+ if(!favorites.length){const note=document.createElement('p');note.className='favorites-empty';note.textContent=t('favoritesEmpty');list.append(note);return;}
+ for(const path of favorites){
+  const row=document.createElement('div');row.className='favorite-row';
+  const button=document.createElement('button');button.type='button';button.className='favorite-open';button.title=absolute(path);
+  button.innerHTML=icon('folder');const label=document.createElement('span');label.className='truncate';label.textContent=path.split('/').at(-1)||root;button.append(label);
+  button.onclick=async()=>{const progress=taskProgress('locatingFolder');try{const entries=await json(query('list',path));cache.set(path,entries);directoryErrors.delete(path);await openGrid(path);await locate(path);setDrawer(false);progress.complete();}catch(error){tell(error);}finally{progress.finish();}};
+  const remove=makeButton('favoriteRemove','star',()=>toggleFavorite({path},true),'icon-button favorite-remove');remove.setAttribute('aria-label',t('favoriteRemove')+' '+label.textContent);
+  row.append(button,remove);list.append(row);
+ }
+}
+async function toggleFavorite(entry,remove=favorites.includes(entry.path)){
+ const progress=taskProgress('savingChanges');try{favorites=await json('/api/favorites',{method:'POST',body:{path:entry.path,remove}});if(!remove)favoriteSection.open=true;renderFavorites();progress.complete();}catch(error){tell(error);}finally{progress.finish();}
+}
+function zipURL(entries){const url=new URL('/api/download-zip',location.href);for(const entry of entries)url.searchParams.append('path',entry.path);return url.href;}
+function saveDownload(url,name){const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();}
+async function downloadZip(entries){
+ if(!entries.length)return;
+ const progress=taskProgress('zipPreparing');bulkBusy=true;updateBulkActions();
+ try{const ready=await streamedOperation('/api/download-zip',{paths:entries.map(entry=>entry.path)},progress);const url=new URL('/api/download-zip',location.href);url.searchParams.set('ticket',ready.ticket);saveDownload(url.href,ready.name);progress.complete();}catch(error){tell(error);}finally{bulkBusy=false;updateBulkActions();progress.finish();}
+}
+function exportDrag(button,entry){
+ if(entry.kind!=='file'&&entry.kind!=='directory')return;
+ button.dataset.exportPath=entry.path;button.draggable=!marqueeActive&&exportDesktop.matches&&(!selecting||marked.has(entry.path));
+ button.addEventListener('dragstart',event=>{
+  if(marqueeActive || !exportDesktop.matches || (selecting&&!marked.has(entry.path))){event.preventDefault();return;}
+  const items=selecting&&marked.has(entry.path)?[...marked.values()]:[entry];
+  const archive=items.length>1||entry.kind==='directory';const name=archive?(items.length===1?(entry.name||'files')+'.zip':'files.zip'):entry.name;
+  const url=archive?zipURL(items):new URL(fileURL(entry.path,true),location.href).href;
+  event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-filemanager-export','1');event.dataTransfer.setData('DownloadURL',(archive?'application/zip':'application/octet-stream')+':'+name+':'+url);
+ });
+}
 function download(entry) {
-  const link=document.createElement('a');
-  link.href=fileURL(entry.path,true);
-  link.download=entry.name;
-  document.body.append(link);
-  link.click();
-  link.remove();
+  saveDownload(fileURL(entry.path,true),entry.name);
 }
 
 function makeButton(label,glyph,callback,className='icon-button',text=false) {
@@ -382,6 +418,8 @@ async function showWorkspace(session) {
   signedIn=true;
   formatFilter.hidden=false;
   root=session.root;
+  favorites=[];
+  const loadingFavorites=json('/api/favorites').then(items=>{favorites=items;renderFavorites();}).catch(tell);
   loadVisibility();
   $('login-screen').hidden=true;
   $('boot').hidden=true;
@@ -397,6 +435,7 @@ async function showWorkspace(session) {
   liveStatus.start();
   renderTree();
   await loadDirectory('');
+  await loadingFavorites;
   renderTree();
 }
 
@@ -452,12 +491,13 @@ function openTreeSort() {
   openMenu(items,button);
 }
 function renderTree(focusPath) {
+  renderFavorites();
   const currentFocus=document.activeElement.closest?.('.tree-row');
   const focus=focusPath ?? currentFocus?.dataset.path;
   const focusMenu=document.activeElement.classList.contains('tree-more');
   const fragment=document.createDocumentFragment();
   const count=[...cache.values()].reduce((sum,list)=>sum+list.filter(entry=>isVisiblePath(entry.path)).length,0);
-  const filter=search.value.trim().toLocaleLowerCase();
+  const filter='';
   const matchMemo=new Map();
   function matches(entry) {
     if (!isVisiblePath(entry.path) || !matchesFormat(entry)) return false;
@@ -492,6 +532,7 @@ function renderTree(focusPath) {
       marker.dataset.label='folderHidden';
       button.append(marker);
     }
+    exportDrag(button,entry);
     button.onclick=()=>isDir?toggleDirectory(entry):showFile(entry);
     button.onkeydown=(e)=>{
       if (e.key==='ContextMenu' || (e.shiftKey && e.key==='F10')) {e.preventDefault(); itemMenu(entry,button); }
@@ -553,6 +594,9 @@ function selectionCheckbox(entry) {
   return box;
 }
 function updateBulkActions() {
+  $('bulk-download').hidden=!selecting;
+  $('bulk-download').disabled=!marked.size||bulkBusy;
+  for(const button of document.querySelectorAll('[data-export-path]'))button.draggable=!marqueeActive&&exportDesktop.matches&&(!selecting||marked.has(button.dataset.exportPath));
   $('bulk-delete').hidden=!selecting;
   $('bulk-delete').disabled=!marked.size || bulkBusy;
   $('bulk-count').textContent=selecting?t('selectedItems',{count:marked.size}):'';
@@ -571,7 +615,9 @@ function gridDragSelection(grid, tiles) {
   rectangle.className='grid-marquee';
   rectangle.setAttribute('aria-hidden','true');
   grid.onpointerdown=event=>{
-    if (bulkBusy || event.button!==0 || event.pointerType!=='mouse' || event.target.closest('.tile-more,input')) return;
+    if (bulkBusy || event.button!==0 || event.pointerType!=='mouse' || event.target.closest('.tile-more,input,[draggable=true]')) return;
+    marqueeActive=true;
+    updateBulkActions();
     drag={id:event.pointerId,x:event.clientX,y:event.clientY,origin:event.target.closest('.file-tile'),scroll:grid.scrollTop};
   };
   grid.onpointermove=event=>{
@@ -605,7 +651,8 @@ function gridDragSelection(grid, tiles) {
     if (!drag || drag.id!==event.pointerId) return;
     const initial=drag.initial;
     drag=null;
-    if (!initial) return;
+    marqueeActive=false;
+    if (!initial) {updateBulkActions();return;}
     if (event.type==='pointerup') {
       selecting=true;
     } else {
@@ -615,7 +662,7 @@ function gridDragSelection(grid, tiles) {
     renderTree();
   };
   grid.onpointerup=grid.onpointercancel=grid.onlostpointercapture=finish;
-  grid.onpointerleave=()=>{if (!drag?.initial) drag=null;};
+  grid.onpointerleave=()=>{if (!drag?.initial) {drag=null;marqueeActive=false;updateBulkActions();}};
 }
 
 function rememberGridScroll() {
@@ -657,7 +704,7 @@ function renderGrid() {
   grid.className=detailView?'file-grid detail-list':'file-grid';
   grid.dataset.path=gridPath;
   const tiles=new Map(), previews=[];
-  const filter=search.value.trim().toLocaleLowerCase();
+  const filter='';
   if(detailView){
     const headers=document.createElement('div');headers.className='detail-headers';
     for(const [key,zh,en] of [['name','名称','Name'],['size','大小','Size'],['kind','类型','Kind'],['modified','修改日期','Modified']]){
@@ -684,6 +731,7 @@ function renderGrid() {
     name.className='truncate';
     name.textContent=entry.name;
     button.append(preview,name);
+    exportDrag(button,entry);
     if(detailView){for(const value of [entry.kind==='directory'?'—':size(entry.size),entry.kind==='directory'?(language==='zh'?'文件夹':'Folder'):(entry.name.split('.').pop().toUpperCase()),new Date(entry.modified).toLocaleString()]){const cell=document.createElement('span');cell.className='detail-cell';cell.textContent=value;button.append(cell);}}
     button.onclick=()=>entry.kind==='directory'?openGrid(entry.path):showFile(entry,{fromGrid:true});
     tile.append(button,makeButton('more','more',event=>itemMenu(entry,event.currentTarget),'icon-button tile-more'));
@@ -1115,6 +1163,7 @@ function renderMenu() {
 function itemMenu(entry,anchor,point) {
   const items=[];
   if (entry.kind==='directory') {
+    items.push([favorites.includes(entry.path)?'favoriteRemove':'favoriteAdd','star',()=>toggleFavorite(entry)],['downloadZip','download',()=>downloadZip([entry])]);
     items.push(['upload','upload',()=>pickUpload(entry.path)],['uploadFolder','uploadFolder',()=>pickUpload(entry.path,true)],['newFolder','newFolder',()=>createFolder(entry.path)]);
   }
   if (entry.kind==='file') items.push(['download','download',()=>download(entry)]);
@@ -2225,7 +2274,7 @@ function openTrashPanel() {
 }
 
 function openSearchPanel() {
-  const path=targetDirectory();
+  const path='';
   const body=document.createElement('section');
   body.className='tool-body';
   const scope=document.createElement('p');
@@ -2238,7 +2287,7 @@ function openSearchPanel() {
   input.value=search.value;
   input.required=true;
   input.autofocus=true;
-  input.dataset.label=input.dataset.placeholder='search';
+  input.dataset.label=input.dataset.placeholder='searchGlobal';
   const submit=makeButton('searchSubmit','search',()=>{},'primary',true);
   submit.type='submit';
   const list=document.createElement('div');
@@ -2247,7 +2296,7 @@ function openSearchPanel() {
   form.append(input,submit);
   body.append(scope,form,list);
   let request;
-  const panel=openToolPanel('searchSubtree',body,()=>request?.abort());
+  const panel=openToolPanel('globalSearchTitle',body,()=>request?.abort());
   if (!panel) return;
   form.onsubmit=async(e)=>{
     e.preventDefault();
@@ -2564,6 +2613,7 @@ for (const [id,glyph] of Object.entries({'login-icon':'server','toggle-tree':'se
 $('tree-sort').onclick=openTreeSort;
 $('open-trash').insertAdjacentHTML('afterbegin',icon('trash'));
 $('open-trash').onclick=openTrashPanel;
+$('search-deep').dataset.label='globalSearchTitle';
 $('search-deep').onclick=openSearchPanel;
 $('download').insertAdjacentHTML('afterbegin',icon('download'));
 $('preview-fullscreen').innerHTML=icon('fullscreen');
@@ -2645,6 +2695,7 @@ for (const input of [$('files'),$('folder-files')]) {
 }
 function enableDropUpload(surface,destination) {
   surface.ondragover=event=>{
+    if(event.dataTransfer?.types.includes('application/x-filemanager-export'))return;
     if (!event.dataTransfer?.types.includes('Files')) return;
     event.preventDefault();
     const allowed=!uploadState && destination()!==null;
@@ -2657,6 +2708,7 @@ function enableDropUpload(surface,destination) {
   surface.ondrop=event=>{
     surface.classList.remove('drop-target');
     const transfer=event.dataTransfer;
+    if(transfer?.types.includes('application/x-filemanager-export'))return;
     if (!transfer?.types.includes('Files')) return;
     event.preventDefault();
     const path=destination();
@@ -2688,8 +2740,9 @@ $('select-many').onclick=()=>{
   renderTree();
 };
 $('bulk-delete').onclick=deleteMarked;
+$('bulk-download').onclick=()=>downloadZip([...marked.values()]);
 $('more').onclick=()=>{if (current) itemMenu(current,$('more'));};
-search.oninput=()=>renderTree();
+search.onkeydown=event=>{if(event.key==='Enter'&&!event.isComposing&&search.value.trim()){event.preventDefault();openSearchPanel();}};
 formatFilter.onchange=()=>{
   // A bulk operation should never retain files filtered out by this control.
   for (const [path,entry] of marked) if (!matchesFormat(entry)) marked.delete(path);

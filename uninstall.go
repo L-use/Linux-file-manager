@@ -83,7 +83,7 @@ func deleteProgramState(state *os.File) error {
 		return err
 	}
 	for _, name := range names {
-		if name != "credentials.json" && name != logFileName && name != controlFileName &&
+		if name != favoritesFile && name != "credentials.json" && name != logFileName && name != controlFileName &&
 			name != previewCacheLimitFile && name != updateModeFile && name != installationSeenFile && !uninstallTemporary(name, ".update-archive-", uploadPrefix+"setting-", ".credential-", ".fm-video-", ".preview-cache-limit-", ffmpegTempPrefix) {
 			continue
 		}

@@ -1,4 +1,9 @@
 const strings = {
+ globalSearchTitle:['全局搜索','Global search'],
+ zipTooMany:['目录超过 100000 个条目，请分批下载','More than 100,000 entries. Please download smaller groups.'],
+ zipPreparing:['正在准备 ZIP 下载…','Preparing ZIP download…'],
+ favorites:['收藏夹','Favorites'],favoriteAdd:['添加到收藏夹','Add to favorites'],favoriteRemove:['取消收藏','Remove favorite'],favoritesEmpty:['右键文件夹即可收藏','Right-click a folder to add it here'],favoritesLimit:['最多收藏 200 个目录','Up to 200 folders can be saved'],favoritesMissing:['收藏目录无法访问，可能已被移动或删除','Favorite folder is unavailable; it may have moved or been deleted'],downloadZip:['下载为 ZIP','Download as ZIP'],downloadSelected:['打包下载','Download selection'],zipBusy:['另一个压缩包正在准备，请稍后重试','Another ZIP is being prepared. Please try again shortly.'],zipSpecial:['目录包含符号链接或特殊文件，无法完整打包','The folder contains a symbolic link or special file and cannot be archived completely'],searchGlobal:['搜索管理目录，按 Enter','Search managed root, press Enter'],dragDownload:['拖到桌面下载（Chrome / Edge）','Drag to desktop to download (Chrome / Edge)'],
+
  collapseExplorer:['收起侧栏','Collapse sidebar'], expandExplorer:['展开侧栏','Expand sidebar'],
  cancelSelectMany:['取消多选','Cancel multi-select'],
  loadingGridThumbnails:['正在加载目录缩略图…','Loading folder thumbnails…'],

@@ -48,9 +48,10 @@
         <button id="refresh" class="icon-button" data-tool-caption="refresh" data-label="refresh"></button>
       </div>
     </header>
-    <div class="search-wrap"><span id="search-icon"></span><input id="search" type="search" data-placeholder="search" data-label="search" autocomplete="off"><button id="search-deep" class="icon-button" data-label="searchSubtree"></button></div>
+    <div class="search-wrap"><span id="search-icon"></span><input id="search" type="search" data-placeholder="searchGlobal" data-label="searchGlobal" autocomplete="off"><button id="search-deep" class="icon-button" data-label="searchSubtree"></button></div>
+    <details id="favorites" class="favorites"><summary><span id="favorites-star"></span><span data-i18n="favorites"></span><span id="favorites-count"></span></summary><div id="favorites-list"></div></details>
     <div id="tree" class="tree"></div>
-    <div class="explorer-selection"><button id="select-many" class="button" type="button" aria-pressed="false" data-i18n="selectMany"></button><span id="bulk-count" aria-live="polite"></span><button id="bulk-delete" class="button" type="button" data-i18n="delete" hidden></button></div>
+    <div class="explorer-selection"><button id="select-many" class="button" type="button" aria-pressed="false" data-i18n="selectMany"></button><button id="bulk-download" class="button" type="button" data-i18n="downloadSelected" hidden></button><span id="bulk-count" aria-live="polite"></span><button id="bulk-delete" class="button" type="button" data-i18n="delete" hidden></button></div>
     <div class="explorer-footer"><span id="folders-icon"></span><span id="item-count"></span><button id="show-hidden" class="icon-button" type="button" data-label="showHidden" aria-pressed="false"></button><button id="open-trash" class="button" data-label="trash"><span data-i18n="trash"></span></button></div>
     <input type="file" id="files" multiple hidden>
     <input type="file" id="folder-files" webkitdirectory multiple hidden>
