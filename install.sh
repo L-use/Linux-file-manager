@@ -119,7 +119,11 @@ fi
 lang=${lang:-en}
 case "$lang" in zh|en) ;; *) fail "Use --lang zh or --lang en." "请使用 --lang zh 或 --lang en。" ;; esac
 
-[ "$(uname -s)" = Linux ] || fail "This installer is for Linux." "此安装脚本仅支持 Linux。"
+case "$(uname -s)" in
+ Linux) platform=linux ;;
+ Darwin) platform=darwin; [ "$(id -u)" -eq 0 ] || user_install=true ;;
+ *) fail "Supported systems: Linux and macOS." "支持 Linux 和 macOS。" ;;
+esac
 case "$(uname -m)" in
   x86_64|amd64) arch=amd64 ;;
   aarch64|arm64) arch=arm64 ;;
@@ -180,7 +184,7 @@ else
   bin_dir=${bin_dir:-$HOME/.local/bin}
 fi
 
-asset="file-manager-linux-$arch"
+asset="file-manager-$platform-$arch"
 original_umask=$(umask)
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/filemanager-install.XXXXXXXX")
@@ -269,6 +273,7 @@ tar -xOzf "$archive" "$asset/filemanager" > "$work/filemanager" ||
 tar -xOzf "$archive" "$asset/config.json" > "$work/config.json" ||
   fail "Missing initial config.json." "发布包缺少初始 config.json。"
 
+if [ "$platform" = linux ]; then
 # The first 20 ELF bytes identify a 64-bit little-endian Linux release and its CPU.
 header=$(od -An -v -t u1 -N20 "$work/filemanager")
 set -- $header
@@ -277,6 +282,13 @@ case "$arch:${19}:${20}" in
   amd64:62:0|arm64:183:0) ;;
   *) fail "Release executable does not match $arch." "可执行文件与 $arch 架构不匹配。" ;;
 esac
+
+else
+  header=$(od -An -v -t u1 -N8 "$work/filemanager")
+  set -- $header
+  [ "$1 $2 $3 $4" = "207 250 237 254" ] || fail "Invalid Mach-O executable." "无效的 macOS 可执行文件。"
+  case "$arch:$5:$6:$7:$8" in amd64:7:0:0:1|arm64:12:0:0:1) ;; *) fail "Architecture mismatch." "架构不匹配。" ;; esac
+fi
 
 step '3/3  Install program' '3/3  安装程序'
 mkdir -p -- "$install_dir" "$bin_dir" ||
@@ -287,7 +299,7 @@ program="$install_dir/filemanager"
 config="$install_dir/config.json"
 link="$bin_dir/filemanager"
 register_service=false
-if [ "$(id -u)" -eq 0 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+if [ "$platform" = linux ] && [ "$(id -u)" -eq 0 ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
   # A root service must not execute a binary replaceable by a normal user.
   directory=$install_dir
   while :; do
@@ -393,6 +405,38 @@ EOF
   systemctl daemon-reload
   write_setting filemanager.systemd filemanager.service
   say '  Registered systemd service filemanager.service' '  已注册 systemd 服务 filemanager.service'
+fi
+
+if [ "$platform" = darwin ]; then
+  if [ "$(id -u)" -eq 0 ]; then service_dir=/Library/LaunchDaemons; else service_dir="$HOME/Library/LaunchAgents"; fi
+  mkdir -p "$service_dir"
+  service_path="$service_dir/io.filemanager.server.plist"
+  if [ -e "$service_path" ]; then
+    grep -Fq '<!-- Managed by File Manager -->' "$service_path" &&
+      grep -Fq "$program" "$service_path" || fail "launchd service belongs to another installation." "launchd 服务属于另一套安装。"
+  fi
+  xml_program=$(printf '%s' "$program" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+  staged_unit=$(mktemp "$service_dir/.filemanager.XXXXXXXX")
+  cat > "$staged_unit" <<EOFPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Managed by File Manager -->
+<plist version="1.0"><dict>
+<key>Label</key><string>io.filemanager.server</string>
+<key>ProgramArguments</key><array><string>$xml_program</string><string>-foreground</string></array>
+<key>StandardOutPath</key><string>$xml_program.launchd.log</string>
+<key>StandardErrorPath</key><string>$xml_program.launchd.log</string>
+<key>RunAtLoad</key><true/>
+<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+<key>ThrottleInterval</key><integer>5</integer>
+<key>Umask</key><integer>63</integer>
+</dict></plist>
+EOFPLIST
+  chmod 0644 "$staged_unit"
+  mv -f "$staged_unit" "$service_path"
+  staged_unit=
+  write_setting filemanager.launchd io.filemanager.server
+  say '  Registered launchd service (starts on login).' '  已注册 launchd 服务（登录时启动）。'
 fi
 
 printf '\n  %s\n  ' "$rule"

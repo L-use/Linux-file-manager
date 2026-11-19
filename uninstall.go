@@ -196,7 +196,7 @@ func uninstallProgram(executable, configName string, state *os.File) error {
 			return err
 		}
 	}
-	for _, name := range []string{registeredCommandFile, languageFile, portableMarker, systemdMarker, installationMarker} {
+	for _, name := range []string{"filemanager.launchd.log", registeredCommandFile, languageFile, portableMarker, systemdMarker, installationMarker} {
 		if err := removeUninstallFile(filepath.Join(appDir, name)); err != nil {
 			return err
 		}

@@ -14,11 +14,13 @@
 
 ## English
 
-Linux File Manager lets you browse and manage existing Linux server directories from your browser. The Go executable embeds the web interface, fonts, icons, document readers, and PDF worker, so the application can run offline.
+Linux File Manager supports Linux and macOS (Apple silicon and Intel) from one source tree and lets you browse and manage existing directories from your browser. The Go executable embeds the web interface, fonts, icons, document readers, and PDF worker, so the application can run offline.
 
 ### Quick online installation
 
-Run this on the Linux server. The default system installation uses root privileges, installs to `/usr/local/filemanager`, and listens on port 8080. The default managed directory is the home directory of the user who starts the installer.
+Run this on Linux or macOS. The installer automatically selects the latest release for your operating system and CPU architecture. On macOS it defaults to a current-user installation and registers a launchd agent; it runs after login. Root installations use a LaunchDaemon. macOS 12 or newer is required.
+
+On Linux, The default system installation uses root privileges, installs to `/usr/local/filemanager`, and listens on port 8080. The default managed directory is the home directory of the user who starts the installer.
 
 ```sh
 curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/install.sh -o install.sh && sh install.sh --start
@@ -148,7 +150,9 @@ The source is licensed under the [MIT License](LICENSE). Bundled components reta
 
 ### 在线快速安装
 
-在 Linux 服务器终端运行。默认通过 sudo 系统安装到 `/usr/local/filemanager`，管理发起安装的用户家目录，端口为 8080。
+在 Linux 或 macOS 终端运行同一条命令，脚本自动识别系统和 CPU 架构，安装对应最新版。macOS 支持 Apple 芯片（arm64）和 Intel（amd64），要求 macOS 12 或以上；默认当前用户安装并注册 launchd 登录服务，root 安装使用系统 LaunchDaemon。
+
+Linux 默认通过 sudo 系统安装到 `/usr/local/filemanager`，管理发起安装的用户家目录，端口为 8080。
 
 ```sh
 curl -fsSL https://github.com/L-use/Linux-file-manager/releases/latest/download/install.sh -o install.sh && sh install.sh --start
@@ -291,3 +295,18 @@ FFMPEG_SOURCE_DIR="$PWD/ffmpeg-source" ./build.sh
 ### 许可证
 
 项目源码采用 [MIT](LICENSE) 许可证。随包发布的第三方组件保留各自的许可证与署名，见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+
+### macOS build / macOS 构建
+
+Build the two self-contained macOS FFmpeg binaries on a Mac with Xcode Command Line Tools, then run the shared release builder. The resulting Linux and macOS ZIP/tar.gz archives coexist in `dist`. macOS downloads are command-line programs, not `.app` bundles; no Apple notarization is provided. Archives downloaded using a browser may require approval in macOS Privacy & Security before first launch. The quick installer downloads through curl.
+
+```sh
+sh build-ffmpeg-macos.sh
+sh build.sh
+```
+
+在已安装 Xcode 命令行工具的 Mac 上构建两个架构的独立 FFmpeg，再执行统一打包脚本。`dist` 同时保存 Linux 与 macOS 安装包。macOS 版是命令行服务程序，非 `.app`，暂未进行 Apple 公证；浏览器下载后首次运行可能需在“隐私与安全性”中允许。快速安装通过 curl 下载。
+
+On macOS, access to protected folders (such as Documents, Desktop and external volumes) is also controlled by macOS Privacy & Security. Grant the installed executable the appropriate access if the system denies reads.
+
+macOS 的文稿、桌面及外接磁盘也受系统“隐私与安全性”控制。如系统拒绝读取，请为安装后的程序授予对应访问权限。

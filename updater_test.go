@@ -40,7 +40,7 @@ func TestReleaseDownloadRejectsInvalidChecksum(t *testing.T) {
 	u.client.Transport = updateTestTransport(func(r *http.Request) (*http.Response, error) {
 		body := "invalid archive"
 		if strings.HasSuffix(r.URL.Path, "/SHA256SUMS") {
-			body = strings.Repeat("0", 64) + "  file-manager-linux-" + runtime.GOARCH + ".tar.gz\n"
+			body = strings.Repeat("0", 64) + "  file-manager-" + runtime.GOOS + "-" + runtime.GOARCH + ".tar.gz\n"
 		}
 		return &http.Response{StatusCode: 200, ContentLength: int64(len(body)), Body: io.NopCloser(strings.NewReader(body))}, nil
 	})

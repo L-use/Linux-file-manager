@@ -17,3 +17,5 @@ The build uses Alpine Linux 3.22 and these library packages:
 To rebuild the binaries, extract the source bundle and run `sh build-ffmpeg.sh /path/to/ffmpeg-source /path/to/ffmpeg-dist` from the project or the extracted source bundle on a machine with Docker available.
 
 Upstream projects: [FFmpeg](https://ffmpeg.org/) · [x264](https://www.videolan.org/developers/x264.html) · [LAME](https://lame.sourceforge.io/) · [zlib](https://zlib.net/).
+
+macOS builds use build-ffmpeg-macos.sh, FFmpeg 8.0.3, static x264 and LAME from the same source archives. Only Apple system libraries are dynamically linked; no Homebrew runtime is needed. Deployment target: macOS 12.

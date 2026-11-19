@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"debug/elf"
+	"debug/macho"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -68,7 +69,7 @@ func (r githubRelease) installable() bool {
 	var archive, checksum bool
 	for _, asset := range r.Assets {
 		if asset.State == "uploaded" {
-			archive = archive || asset.Name == "file-manager-linux-"+runtime.GOARCH+".tar.gz"
+			archive = archive || asset.Name == "file-manager-"+runtime.GOOS+"-"+runtime.GOARCH+".tar.gz"
 			checksum = checksum || asset.Name == "SHA256SUMS"
 		}
 	}
@@ -164,7 +165,7 @@ func (u *releaseUpdater) setMode(mode string) error {
 }
 
 func supportedUpdate() bool {
-	return runtime.GOOS == "linux" && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") && releaseTag.MatchString(buildVersion)
+	return (runtime.GOOS == "linux" || runtime.GOOS == "darwin") && (runtime.GOARCH == "amd64" || runtime.GOARCH == "arm64") && releaseTag.MatchString(buildVersion)
 }
 
 func newerRelease(latest, current string) bool {
@@ -383,7 +384,7 @@ func (u *releaseUpdater) install(ctx context.Context, tag string, automatic bool
 
 func (u *releaseUpdater) download(ctx context.Context, tag string) (string, error) {
 	base := "https://github.com/" + releaseRepository + "/releases/download/" + tag + "/"
-	archiveName := "file-manager-linux-" + runtime.GOARCH
+	archiveName := "file-manager-" + runtime.GOOS + "-" + runtime.GOARCH
 	resp, err := u.request(ctx, base+"SHA256SUMS")
 	if err != nil {
 		return "", err
@@ -472,15 +473,25 @@ func stageReleaseBinary(archive io.Reader, member, directory string) (string, er
 		if _, err := io.CopyN(out, reader, header.Size); err != nil {
 			return "", err
 		}
-		image, err := elf.NewFile(out)
-		if err != nil {
-			return "", err
-		}
-		if image.Class != elf.ELFCLASS64 ||
-			(runtime.GOARCH == "amd64" && image.Machine != elf.EM_X86_64) ||
-			(runtime.GOARCH == "arm64" && image.Machine != elf.EM_AARCH64) ||
-			(image.Type != elf.ET_EXEC && image.Type != elf.ET_DYN) {
-			return "", errors.New("release executable does not match the server")
+		if runtime.GOOS == "darwin" {
+			image, err := macho.NewFile(out)
+			if err != nil {
+				return "", err
+			}
+			if image.Type != macho.TypeExec || (runtime.GOARCH == "arm64" && image.Cpu != macho.CpuArm64) || (runtime.GOARCH == "amd64" && image.Cpu != macho.CpuAmd64) {
+				return "", errors.New("release executable does not match the server")
+			}
+		} else {
+			image, err := elf.NewFile(out)
+			if err != nil {
+				return "", err
+			}
+			if image.Class != elf.ELFCLASS64 ||
+				(runtime.GOARCH == "amd64" && image.Machine != elf.EM_X86_64) ||
+				(runtime.GOARCH == "arm64" && image.Machine != elf.EM_AARCH64) ||
+				(image.Type != elf.ET_EXEC && image.Type != elf.ET_DYN) {
+				return "", errors.New("release executable does not match the server")
+			}
 		}
 		if err := out.Chmod(0755); err != nil {
 			return "", err

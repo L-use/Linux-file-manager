@@ -33,7 +33,7 @@ func prepareFFmpeg(configured string, state *os.File) (string, func(), error) {
 		return "", nil, errors.New("bundled FFmpeg requires a private state directory owned by the service user")
 	}
 	// Resolve through the held directory descriptor, even if a parent path is renamed.
-	directory := fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), state.Fd())
+	directory := lifecycleSocketPath(state, "")
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		return "", nil, err
