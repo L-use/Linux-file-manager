@@ -18,7 +18,7 @@ Linux File Manager supports Linux and macOS (Apple silicon and Intel) from one s
 
 ### Quick online installation
 
-Run this on Linux or macOS. The installer automatically selects the latest release for your operating system and CPU architecture. On macOS it defaults to a current-user installation and registers a launchd agent; it runs after login. Root installations use a LaunchDaemon. macOS 12 or newer is required.
+Run this on Linux or macOS. The installer automatically selects the latest release for your operating system and CPU architecture. On macOS it defaults to a current-user installation and registers a launchd agent; it runs after login. Root installations use a LaunchDaemon. macOS 13 or newer is required.
 
 On Linux, The default system installation uses root privileges, installs to `/usr/local/filemanager`, and listens on port 8080. The default managed directory is the home directory of the user who starts the installer.
 
@@ -150,7 +150,7 @@ The source is licensed under the [MIT License](LICENSE). Bundled components reta
 
 ### 在线快速安装
 
-在 Linux 或 macOS 终端运行同一条命令，脚本自动识别系统和 CPU 架构，安装对应最新版。macOS 支持 Apple 芯片（arm64）和 Intel（amd64），要求 macOS 12 或以上；默认当前用户安装并注册 launchd 登录服务，root 安装使用系统 LaunchDaemon。
+在 Linux 或 macOS 终端运行同一条命令，脚本自动识别系统和 CPU 架构，安装对应最新版。macOS 支持 Apple 芯片（arm64）和 Intel（amd64），要求 macOS 13 或以上；默认当前用户安装并注册 launchd 登录服务，root 安装使用系统 LaunchDaemon。
 
 Linux 默认通过 sudo 系统安装到 `/usr/local/filemanager`，管理发起安装的用户家目录，端口为 8080。
 
