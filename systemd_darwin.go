@@ -82,7 +82,33 @@ func systemctl(args ...string) error {
 		if exec.Command("/bin/launchctl", "print", launchdDomain()+"/"+systemdUnit).Run() != nil {
 			return nil
 		}
-		return launchctl("bootout", launchdDomain()+"/"+systemdUnit)
+		if err := launchctl("bootout", launchdDomain()+"/"+systemdUnit); err != nil {
+			return err
+		}
+		executable, err := os.Executable()
+		if err != nil {
+			return err
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return err
+		}
+		cfg, name, err := configFile(filepath.Dir(executable), "")
+		if err != nil {
+			return err
+		}
+		state, err := configPath(cfg.State, filepath.Dir(name))
+		if err != nil {
+			return err
+		}
+		deadline := time.Now().Add(12 * time.Second)
+		for time.Now().Before(deadline) {
+			if inspectDaemon(state) == daemonStopped {
+				return nil
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		return errors.New("launchd service did not stop within 12 seconds")
 	}
 	return nil
 }

@@ -416,6 +416,7 @@ if [ "$platform" = darwin ]; then
       grep -Fq "$program" "$service_path" || fail "launchd service belongs to another installation." "launchd 服务属于另一套安装。"
   fi
   xml_program=$(printf '%s' "$program" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+  xml_home=$(printf '%s' "$HOME" | sed 's/\&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
   staged_unit=$(mktemp "$service_dir/.filemanager.XXXXXXXX")
   cat > "$staged_unit" <<EOFPLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -426,6 +427,7 @@ if [ "$platform" = darwin ]; then
 <key>ProgramArguments</key><array><string>$xml_program</string><string>-foreground</string></array>
 <key>StandardOutPath</key><string>$xml_program.launchd.log</string>
 <key>StandardErrorPath</key><string>$xml_program.launchd.log</string>
+<key>EnvironmentVariables</key><dict><key>HOME</key><string>$xml_home</string></dict>
 <key>RunAtLoad</key><true/>
 <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
 <key>ThrottleInterval</key><integer>5</integer>
